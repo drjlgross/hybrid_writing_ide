@@ -9,8 +9,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+
 import { canonicalize } from '../src/canonicalize.js';
 import { FIXTURE, FIXTURE_PATH, REQUIRED_CONSTRUCTS } from './fixtures/index.js';
+
+/** Parse Markdown to mdast for structural assertions. Parse only — no stringify. */
+const mdastOf = (md) => unified().use(remarkParse).parse(md);
 
 /** Whole fixture, plus each of its blocks, plus degenerate inputs. */
 const BLOCKS = FIXTURE.split(/\n{2,}/).filter((b) => b.trim() !== '');
@@ -119,9 +125,25 @@ test('adjacent same-type lists merge, and no + marker ever reaches the store', (
 });
 
 test('every list is tight', () => {
-  // Not one of the original §0.1 pins — reported for ratification. A tightness rule
-  // is forced by the merge (tight + loose has to resolve to one of them), and loose
-  // vs tight is trivia the model flips at random, which would diff as a whole list.
+  // §0.1 "Tight lists" and its required test: no list in canonical output is spread.
+  // Asserted structurally on the fixture's canonical output — a spread list is a
+  // property of the mdast node, and matching on blank lines in the text only catches
+  // it indirectly.
+  const tree = mdastOf(canonicalize(FIXTURE));
+  const lists = [];
+  const walk = (node) => {
+    if (node.type === 'list') lists.push(node);
+    for (const child of node.children ?? []) walk(child);
+  };
+  walk(tree);
+  assert.ok(lists.length > 0, 'canonical fixture output contains no list to check');
+  for (const list of lists) {
+    assert.equal(list.spread, false, `list node is spread: ${JSON.stringify(list.position)}`);
+    for (const item of list.children) {
+      assert.equal(item.spread, false, `list item is spread: ${JSON.stringify(item.position)}`);
+    }
+  }
+
   assert.equal(canonicalize('- a\n\n- b\n'), '- a\n- b\n', 'loose list must tighten');
   assert.equal(canonicalize('- a\n- b\n\n- c\n'), '- a\n- b\n- c\n', 'part-loose list must tighten');
   assert.equal(

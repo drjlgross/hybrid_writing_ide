@@ -63,13 +63,9 @@ function mergeAdjacentListsIn(node) {
   node.children = kept;
 
   for (const child of kept) {
-    // Every list is tight. NOT in the original §0.1 pins — reported for
-    // ratification. Two reasons: merging a tight list with a loose one has to
-    // pick a tightness, and without a rule the loose one wins and sprays blank
-    // lines through items that were tight; and looseness is trivia the model
-    // will flip at random, which would show up as a whole-list phantom diff
-    // with no word changed. Only the list's own spread is cleared — a list item
-    // holding two paragraphs keeps the blank line between them.
+    // Tight lists, per §0.1. Only the list's own spread is cleared, never a list
+    // item's — §0.1 is explicit that an item holding two paragraphs must keep the
+    // blank line between them.
     if (child.type === 'list') child.spread = false;
     mergeAdjacentListsIn(child);
   }
@@ -99,8 +95,8 @@ export function canonicalize(md) {
     throw new TypeError(`canonicalize expects a string, got ${typeof md}`);
   }
 
-  // Normalize line endings and stray form feeds before parsing so CRLF from a
-  // Windows paste does not survive as a difference in the store.
+  // Normalize CRLF and lone CR to LF before parsing, so a Windows paste does not
+  // survive as a difference in the store.
   const input = md.replace(/\r\n?/g, '\n');
 
   const out = String(processor.processSync(input));

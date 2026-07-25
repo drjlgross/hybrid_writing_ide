@@ -145,6 +145,12 @@ Required tests:
   added, so the permitted set would silently accumulate dead entries that pre-tolerate a
   future divergence.
 
+  Granularity: containment per case, equality over the union of all cases. Per-case
+  equality is impossible, since one canonical block produces only `&` and another only
+  `_`. The union form couples this test to the fixture — if the fixture stops exercising
+  a permitted character, that is a fixture regression and must fail as one, with a
+  message saying which.
+
   `doc` is derived from canonical input, not raw. The editor is only ever loaded from a
   canonical snapshot (§0.6), and a doc parsed from raw input can hold two adjacent lists,
   which the merge rule above is supposed to collapse.
@@ -157,6 +163,13 @@ Required tests:
   test is kept because it catches marker and list-indent drift from a TipTap upgrade,
   which is what it was reaching for. Round-trip identity above is what makes the
   remaining escape divergence harmless: canonicalize is the last step on the write path.
+
+This test and round-trip identity are not redundant. Round-trip identity stays green
+  when the TipTap serializer's dialect drifts, because canonicalize normalizes the drift
+  away, and this test catches it. This test stays green when TipTap starts autolinking
+  bare URLs at parse time, and round-trip identity catches that. Neither subsumes the
+  other; do not delete either as duplicative.
+
 - **No escape accumulation:** run canonicalize ten times over the escaping fixture
   (§5) and assert the output never grows.
 - **No `+` bullet ever reaches the store:** the fixture includes two adjacent lists
