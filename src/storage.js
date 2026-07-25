@@ -172,6 +172,17 @@ function atomicWrite(finalPath, tmp, contents, hooks = {}) {
   hooks.beforeRename?.();
 
   renameSync(tmp, finalPath);
+
+  // Flushing the file only makes its CONTENTS durable. The rename is a change to the
+  // containing directory, and without this a crash immediately after the rename can
+  // leave the directory entry unwritten — the data survives under the temp name and
+  // the session appears to have lost its last commit.
+  const dirFd = openSync(dirname(finalPath), 'r');
+  try {
+    fsyncSync(dirFd);
+  } finally {
+    closeSync(dirFd);
+  }
 }
 
 /**
