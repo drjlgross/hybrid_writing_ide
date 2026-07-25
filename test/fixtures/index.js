@@ -49,4 +49,23 @@ export const REQUIRED_CONSTRUCTS = [
   ['stacked blank lines to normalize', (s) => /\n{3,}/.test(s)],
   ['stray underscore', (s) => /underscore _ standing alone/.test(s)],
   ['link target with parentheses', (s) => /\(https:\/\/example\.com\/a_\(b\)\)/.test(s)],
+
+  // Added in chunk 2a. Each of these is representable in TipTap, so each is a live
+  // round-trip-identity case rather than a canonicalize-only one.
+  ['literal backslash in prose', (s) => /backslash \\ stands alone/.test(s)],
+  ['backslash before a letter (Windows path)', (s) => /C:\\temp\\file/.test(s)],
+  ['entity text (&amp; and &nbsp;)', (s) => s.includes('&amp;') && s.includes('&nbsp;')],
+  ['ampersand before a letter, outside a link destination', (s) => /AT&T|R&D/.test(s)],
+  ['mailto link', (s) => /\[mail me\]\(mailto:writer@example\.com\)/.test(s)],
+  ['mailto link with a query string', (s) => /\(mailto:docs@example\.com\?subject=Hello\)/.test(s)],
+  ['a LOOSE bullet list', (s) => {
+    // Blank line between two items of the same list — what makes remark set spread.
+    const blocks = s.split(/\n{2,}/).filter((b) => b.trim() !== '');
+    return blocks.some(
+      (b, i) => /^- Loose item/.test(b) && blocks[i + 1] !== undefined && /^- Loose item/.test(blocks[i + 1]),
+    );
+  }],
+  ['nested bullet list', (s) => /^- Outer bullet with a nested list.*\n {2}- Nested inner bullet/m.test(s)],
+  ['multi-paragraph list item', (s) =>
+    /^- Item one holds two paragraphs.*\n\n {2}This second paragraph belongs/m.test(s)],
 ];

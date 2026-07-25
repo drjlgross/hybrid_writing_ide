@@ -1,5 +1,5 @@
 /**
- * CLAUDE.md §0.1 test 2 — "TipTap is a fixed point":
+ * CLAUDE.md §0.1 — "TipTap is a fixed point, up to escape differences":
  *   canonicalize(tiptapSerialize(doc)) === tiptapSerialize(doc)
  *
  * Purpose per the spec: catch a TipTap upgrade changing markers.
@@ -11,16 +11,16 @@
  * editor is only ever loaded from a canonical snapshot (§0.1, §0.6). Convergence
  * from non-canonical input is covered by the last test in this file.
  *
- * KNOWN DEVIATION (reported, deliberate): strict byte equality does not hold, and
- * cannot be reached from the TipTap side. remark-stringify escapes conservatively
- * (`snake\_case\_name`, `?a=1\&b=2`); tiptap-markdown's prosemirror-markdown
- * serializer does not, and exposes no option to make it. So this file asserts a
- * fixed point up to added backslashes, and pins the divergence to exactly that:
- *   - structure and markers must match byte-for-byte,
- *   - the only permitted difference is backslashes canonicalize ADDS before `_`
- *     or `&`,
- *   - canonicalize must be stable on TipTap's output.
- * Any marker, indent, or structural drift from a TipTap upgrade still fails here.
+ * Strict byte equality does not hold and cannot be reached from the TipTap side.
+ * The two serializers escape differently in both directions:
+ *   - remark-stringify escapes conservatively where TipTap does not
+ *     (`snake\_case\_name`, `?a=1\&b=2`), so canonicalize ADDS backslashes,
+ *     pinned to exactly `_` and `&`;
+ *   - TipTap escapes a literal backslash as `\\` where remark-stringify emits a
+ *     bare `\`, so canonicalize REMOVES backslashes, pinned to exactly `\`.
+ * Structure and markers must still match byte-for-byte, and canonicalize must be
+ * stable on TipTap's output. Any marker, indent, or structural drift from a TipTap
+ * upgrade still fails here.
  */
 
 import { test } from 'node:test';
@@ -31,108 +31,182 @@ import { getSchema } from '@tiptap/core';
 import { canonicalize } from '../src/canonicalize.js';
 import { buildExtensions } from '../src/tiptap-config.js';
 import { FIXTURE } from './fixtures/index.js';
+import { canonicalCases } from './helpers/cases.js';
 import { tiptapRoundTrip } from './helpers/headless-editor.js';
 
-/** Characters canonicalize() is allowed to escape that TipTap leaves bare. */
+// §0.1: a difference is tolerated only where round-trip identity holds for the same
+// construct AND the difference is pinned to an exact named set, asserted
+// bidirectionally. Each set below narrows what this test can catch, which is why the
+// marker and list-indent mutations are re-verified every time one is added.
+
+/** Characters canonicalize() escapes that TipTap leaves bare (§0.1). */
 const PERMITTED_ADDED_ESCAPES = new Set(['_', '&']);
 
+/** Characters TipTap escapes that canonicalize leaves bare (§0.1). */
+const PERMITTED_REMOVED_ESCAPES = new Set(['\\']);
+
 /**
- * Assert that `canonical` is `tiptapOut` with nothing changed except added
- * backslashes, and return which characters those backslashes were added before.
- *
- * Deliberately does NOT consult the allowlist: that separation is what lets a
- * structural change (marker or indent drift) and an unpermitted escape character
- * produce different failure messages. Gating the walk on the allowlist collapses
- * both into one message and makes the caller's check unreachable.
- *
- * @returns {{char: string, index: number}[]} the escapes canonicalize added
+ * Blank lines TipTap emits between blocks that canonicalize removes (§0.1). A list
+ * item holding two paragraphs makes tiptap-markdown serialize the whole list loose;
+ * the tight-list rule takes the blank line back out.
  */
-function diffOnlyAddedEscapes(tiptapOut, canonical, label) {
+const PERMITTED_EXTRA_BLANK_LINES = new Set(['between list items']);
+
+/**
+ * Walk `tiptapOut` against `canonical` and classify every difference as an escape
+ * canonicalize added, an escape canonicalize removed, a blank line canonicalize
+ * removed, or a structural divergence.
+ *
+ * Deliberately does NOT consult any allowlist: that separation is what lets a
+ * structural change (marker or indent drift) and an unpermitted difference produce
+ * different failure messages. Gating the walk on an allowlist collapses them into
+ * one message and makes the caller's checks unreachable.
+ *
+ * @returns {{added: object[], removed: object[], extraBlankLines: object[]}}
+ */
+function diffTolerated(tiptapOut, canonical, label) {
   const added = [];
+  const removed = [];
+  const extraBlankLines = [];
   let i = 0;
   let j = 0;
   while (i < tiptapOut.length || j < canonical.length) {
     if (tiptapOut[i] === canonical[j]) {
+      // Both sides sit on a backslash, but TipTap doubled it where canonical did
+      // not: that is a removed escape, not a match. Checked here rather than before
+      // the equality test, so a `\\` present on BOTH sides still matches normally.
+      const tiptapDoubled =
+        tiptapOut[i] === '\\' && tiptapOut[i + 1] === '\\' && canonical[j + 1] !== '\\';
+      if (!tiptapDoubled) {
+        i += 1;
+        j += 1;
+        continue;
+      }
+      removed.push({ char: '\\', index: i });
       i += 1;
-      j += 1;
       continue;
     }
-    // An inserted escape: canonical has a backslash TipTap does not, and the very
-    // next canonical character is the one TipTap is sitting on.
+    // An added escape: canonical has a backslash TipTap does not, and the very next
+    // canonical character is the one TipTap is sitting on.
     if (canonical[j] === '\\' && canonical[j + 1] !== undefined && tiptapOut[i] === canonical[j + 1]) {
       added.push({ char: canonical[j + 1], index: j });
       j += 1;
       continue;
     }
+    // A removed escape in any other position: TipTap has a backslash canonical does
+    // not, and the character it escapes is what canonical is sitting on.
+    if (tiptapOut[i] === '\\' && tiptapOut[i + 1] !== undefined && canonical[j] === tiptapOut[i + 1]) {
+      removed.push({ char: tiptapOut[i + 1], index: i });
+      i += 1;
+      continue;
+    }
+    // An extra blank line: TipTap has a newline canonical does not, and what follows
+    // in both is the start of a list-item line. Narrow on purpose — an extra newline
+    // anywhere else is structural and must still fail.
+    if (
+      tiptapOut[i] === '\n' &&
+      canonical[j] === tiptapOut[i + 1] &&
+      canonical[j - 1] === '\n' &&
+      /^ *- /.test(canonical.slice(j, j + 8))
+    ) {
+      extraBlankLines.push({ kind: 'between list items', index: i });
+      i += 1;
+      continue;
+    }
     assert.fail(
       `STRUCTURAL DIVERGENCE in case "${label}": TipTap output and its ` +
-        'canonicalization differ by something other than an added escape. A marker, ' +
-        'list indent, or blank-line change — check the pinned STRINGIFY_OPTIONS and ' +
-        'MARKDOWN_OPTIONS against each other.\n' +
+        'canonicalization differ by something other than a tolerated difference. A ' +
+        'marker, list indent, or blank-line change — check the pinned ' +
+        'STRINGIFY_OPTIONS and MARKDOWN_OPTIONS against each other.\n' +
         `  at tiptap[${i}] / canonical[${j}]\n` +
         `  tiptap:    ${JSON.stringify(tiptapOut.slice(Math.max(0, i - 40), i + 40))}\n` +
         `  canonical: ${JSON.stringify(canonical.slice(Math.max(0, j - 40), j + 40))}`,
     );
   }
-  return added;
+  return { added, removed, extraBlankLines };
 }
 
 const CANONICAL_FIXTURE = canonicalize(FIXTURE);
+const CASES = canonicalCases(CANONICAL_FIXTURE);
 
-const CASES = [
-  ['whole canonical fixture', CANONICAL_FIXTURE],
-  ...CANONICAL_FIXTURE.split(/\n{2,}/)
-    .filter((b) => b.trim() !== '')
-    .map((b, i) => [`canonical block ${i + 1}: ${b.slice(0, 42).replace(/\n/g, '⏎')}…`, b]),
-];
-
-test('TipTap is a fixed point of canonicalize, up to added escapes', async (t) => {
-  const observed = new Set();
+test('TipTap is a fixed point of canonicalize, up to pinned differences', async (t) => {
+  const observedAdded = new Set();
+  const observedRemoved = new Set();
+  const observedBlankLines = new Set();
 
   for (const [label, input] of CASES) {
     await t.test(label, () => {
       const tiptapOut = tiptapRoundTrip(input);
       const canonical = canonicalize(tiptapOut);
 
-      const added = diffOnlyAddedEscapes(tiptapOut, canonical, label);
+      const { added, removed, extraBlankLines } = diffTolerated(tiptapOut, canonical, label);
+
       for (const { char } of added) {
         assert.ok(
           PERMITTED_ADDED_ESCAPES.has(char),
-          `NEW DIVERGENCE: canonicalize added an escape before ${JSON.stringify(char)} in ` +
-            `case "${label}", which the allowlist does not permit. Either TipTap's ` +
-            `serializer changed, or canonicalize started escaping something new.`,
+          `NEW ADDED-ESCAPE DIVERGENCE: canonicalize added an escape before ` +
+            `${JSON.stringify(char)} in case "${label}", which PERMITTED_ADDED_ESCAPES ` +
+            `does not permit. Either TipTap's serializer stopped escaping something, or ` +
+            `canonicalize started escaping something new.`,
         );
-        observed.add(char);
+        observedAdded.add(char);
       }
 
-      // Whatever escapes were added, canonicalize must not add more next pass.
+      for (const { char } of removed) {
+        assert.ok(
+          PERMITTED_REMOVED_ESCAPES.has(char),
+          `NEW REMOVED-ESCAPE DIVERGENCE: canonicalize removed an escape before ` +
+            `${JSON.stringify(char)} in case "${label}", which PERMITTED_REMOVED_ESCAPES ` +
+            `does not permit. Either TipTap's serializer started escaping something, or ` +
+            `canonicalize stopped escaping something.`,
+        );
+        observedRemoved.add(char);
+      }
+
+      for (const { kind } of extraBlankLines) {
+        assert.ok(
+          PERMITTED_EXTRA_BLANK_LINES.has(kind),
+          `NEW BLANK-LINE DIVERGENCE: canonicalize removed a blank line ${kind} in case ` +
+            `"${label}", which PERMITTED_EXTRA_BLANK_LINES does not permit. Either ` +
+            `TipTap's serializer changed its block spacing, or canonicalize started ` +
+            `collapsing blank lines somewhere new.`,
+        );
+        observedBlankLines.add(kind);
+      }
+
+      // Whatever differed, canonicalize must not churn further next pass.
       assert.equal(canonicalize(canonical), canonical, 'canonicalize is not stable on TipTap output');
     });
   }
 
-  // §0.1 requires the pin to be an EQUALITY, not a containment. Per case that is
-  // impossible — canonical block 1 produces only '&' (a link destination) and block 4
-  // produces only '_' (snake_case_name) — so the pin is:
-  //   containment per case (asserted above, fails fast and names the case), and
-  //   equality over the UNION of all cases (asserted here).
+  // §0.1: the pin is an EQUALITY for every set, not a containment, at the granularity
+  // of containment per case and equality over the union of all cases. Per-case equality
+  // is impossible — one node produces only '&', another only '_', only the backslash
+  // node produces a removal, and only the multi-paragraph list produces a blank line.
   //
   // The union form deliberately couples this test to the fixture: if the fixture stops
-  // producing one of the permitted characters, that is a fixture regression and must
-  // fail, because a permitted character nothing exercises is slack that pre-tolerates
-  // a future divergence. The two directions therefore get distinct messages.
-  const unexercised = [...PERMITTED_ADDED_ESCAPES].filter((c) => !observed.has(c)).sort();
-  assert.deepEqual(
-    unexercised,
-    [],
-    `FIXTURE REGRESSION: the allowlist permits ${JSON.stringify(unexercised)} but no case ` +
-      `in the fixture produces that escape any more. Either restore the construct that ` +
-      `exercised it (§5) or remove the character from PERMITTED_ADDED_ESCAPES — a ` +
-      `permitted-but-unexercised character silently tolerates a future divergence.`,
-  );
+  // producing one of the permitted differences, that is a fixture regression and must
+  // fail as one, because a permitted difference nothing exercises is slack that
+  // pre-tolerates a future divergence. Each set gets its own message.
+  for (const [setName, permitted, observed] of [
+    ['PERMITTED_ADDED_ESCAPES', PERMITTED_ADDED_ESCAPES, observedAdded],
+    ['PERMITTED_REMOVED_ESCAPES', PERMITTED_REMOVED_ESCAPES, observedRemoved],
+    ['PERMITTED_EXTRA_BLANK_LINES', PERMITTED_EXTRA_BLANK_LINES, observedBlankLines],
+  ]) {
+    const unexercised = [...permitted].filter((c) => !observed.has(c)).sort();
+    assert.deepEqual(
+      unexercised,
+      [],
+      `FIXTURE REGRESSION (${setName}): permits ${JSON.stringify(unexercised)} but no case ` +
+        `in the fixture produces that difference any more. Either restore the ` +
+        `construct that exercised it (§5) or remove the entry from ${setName} — a ` +
+        `permitted-but-unexercised difference silently tolerates a future divergence.`,
+    );
 
-  // Belt and braces: observed ⊆ permitted is enforced per case, unexercised is empty
-  // here, so the two sets are equal. Asserted explicitly so the invariant is legible.
-  assert.deepEqual([...observed].sort(), [...PERMITTED_ADDED_ESCAPES].sort());
+    // Belt and braces: containment is enforced per case and unexercised is empty here,
+    // so the two sets are equal. Asserted explicitly so the invariant is legible.
+    assert.deepEqual([...observed].sort(), [...permitted].sort(), `${setName} != observed`);
+  }
 });
 
 test("TipTap's serializer emits the pinned dialect", () => {

@@ -136,16 +136,40 @@ Required tests:
   Convergence (non-canonical input reaching a fixed point in one pass) is a weaker
   property and does not substitute for this. A function can converge to a fixed point
   that is not the canonical fixture.
-- **TipTap is a fixed point, up to added escapes:** `canonicalize(tiptapSerialize(doc))`
-  must equal `tiptapSerialize(doc)` except for backslashes canonicalize *adds*, and
-  the permitted set is pinned to exactly `_` and `&`.
+- **TipTap is a fixed point, up to escape differences:**
+  `canonicalize(tiptapSerialize(doc))` must equal `tiptapSerialize(doc)`
+  except for backslash escapes canonicalize *adds*, pinned to exactly
+  `_` and `&`, and backslash escapes canonicalize *removes*, pinned to
+  exactly `\`.
+
+  The removal case exists because TipTap's serializer escapes a literal
+  backslash as `\\` and remark-stringify does not. Round-trip identity
+  holds for that construct, so the store is unaffected. The divergence
+  is serializer dialect, which is what this test is for.
+
+  These tolerances follow a rule rather than a list. Where TipTap's
+  serializer and canonicalize disagree, the difference may be tolerated
+  if and only if round-trip identity holds for the same construct,
+  proving the store is unaffected, and the difference is pinned to an
+  exact named set asserted bidirectionally at the granularity above.
+  Anything else fails. Currently pinned: added escapes `{_, &}`,
+  removed escapes `{\}`, and the blank line between list items that a
+  multi-paragraph item induces.
+
+  Each tolerance describes a normalization canonicalize performs
+  deliberately, and each one narrows what this test can catch. The test
+  survives only while it still catches marker and list-indent drift.
+  That is mutation-verified. If it ever stops, replace it with a direct
+  structural assertion on TipTap's output rather than adding another
+  tolerance.
 
   The pin is bidirectional: assert the observed divergence set EQUALS the permitted set,
   not that it is contained by it. A containment check cannot fail when a character is
   added, so the permitted set would silently accumulate dead entries that pre-tolerate a
   future divergence.
 
-  Granularity: containment per case, equality over the union of all cases. Per-case
+  Granularity, for both the added and removed sets: containment per
+  case, equality over the union of all cases. Per-case
   equality is impossible, since one canonical block produces only `&` and another only
   `_`. The union form couples this test to the fixture — if the fixture stops exercising
   a permitted character, that is a fixture regression and must fail as one, with a
@@ -436,11 +460,10 @@ accumulating silently across passes.
 - Export history as JSON/markdown report
 
 ## 9. Build order
-1. `canonicalize()` + its tests per §0.1 (idempotence, fixed point up to added escapes,
-   no escape growth, no `+` bullets, every list tight)
+1. `canonicalize()` + its tests per §0.1 (idempotence, fixed point up to escape
+   differences, no escape growth, no `+` bullets, every list tight)
 2. Round-trip identity FIRST — `canonicalize(tiptapSerialize(tiptapParse(canonical)))
-   === canonical` against the shared fixture — then the rest of the round-trip work,
-   then the HTML clipboard fixture per §5
+   === canonical` against the shared fixture — then the rest of the round-trip work
 
    Nested bullet lists, multi-paragraph list items, and mailto links are all
    representable in TipTap and all absent from the shared fixture. Test them before
@@ -468,8 +491,12 @@ accumulating silently across passes.
 
 5. AI endpoint with the full 2.4 sequence and 2.3 guards, including the out-of-dialect
    construct check
-6. History view: diffs, read-only turn view, restore
-7. Everything else
+6. HTML clipboard fixture per §5
+
+   Deferred by priority, not dependency — the test is headless and could run now, but
+   storage and the turn model are what stand between here and a runnable smoke session.
+7. History view: diffs, read-only turn view, restore
+8. Everything else
 
 Do not proceed past step 1 until the canonicalize tests pass. Everything downstream
 depends on one dialect being real.

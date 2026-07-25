@@ -11,10 +11,9 @@
  * its own canonicalization and tolerates added escapes. This one is an equality
  * against the fixture, with no tolerance of any kind.
  *
- * Every input here is canonical BY CONSTRUCTION — each case is passed through
- * canonicalize first. A block sliced out of a canonical document is not itself
- * necessarily canonical (the last one carries the document's trailing newline),
- * and comparing against a non-canonical input would test nothing.
+ * Cases come from the shared generator, which splits on top-level mdast nodes and
+ * canonicalizes each slice, so every input is canonical by construction and no
+ * construct containing a blank line is torn apart (F14).
  */
 
 import { test } from 'node:test';
@@ -22,16 +21,10 @@ import assert from 'node:assert/strict';
 
 import { canonicalize } from '../src/canonicalize.js';
 import { FIXTURE } from './fixtures/index.js';
+import { canonicalCases } from './helpers/cases.js';
 import { tiptapRoundTrip } from './helpers/headless-editor.js';
 
-const CANONICAL_FIXTURE = canonicalize(FIXTURE);
-
-const CASES = [
-  ['whole canonical fixture', CANONICAL_FIXTURE],
-  ...CANONICAL_FIXTURE.split(/\n{2,}/)
-    .filter((b) => b.trim() !== '')
-    .map((b, i) => [`canonical block ${i + 1}: ${b.slice(0, 42).replace(/\n/g, '⏎')}…`, canonicalize(b)]),
-];
+const CASES = canonicalCases(canonicalize(FIXTURE));
 
 test('round-trip identity: canonical → TipTap → canonical is byte-identical', async (t) => {
   for (const [label, canonical] of CASES) {
