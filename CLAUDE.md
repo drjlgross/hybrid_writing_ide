@@ -188,7 +188,7 @@ Required tests:
   which is what it was reaching for. Round-trip identity above is what makes the
   remaining escape divergence harmless: canonicalize is the last step on the write path.
 
-This test and round-trip identity are not redundant. Round-trip identity stays green
+  This test and round-trip identity are not redundant. Round-trip identity stays green
   when the TipTap serializer's dialect drifts, because canonicalize normalizes the drift
   away, and this test catches it. This test stays green when TipTap starts autolinking
   bare URLs at parse time, and round-trip identity catches that. Neither subsumes the

@@ -134,48 +134,63 @@ test('TipTap is a fixed point of canonicalize, up to pinned differences', async 
   const observedRemoved = new Set();
   const observedBlankLines = new Set();
 
+  // A union assertion over an incomplete run is not meaningful: a case that failed
+  // never recorded its differences, so every tolerance it was the sole exerciser of
+  // looks unexercised. With three sets that is three ways for one real failure to
+  // produce misleading company, so the union checks are skipped when any case failed.
+  let caseFailures = 0;
+
+  const runCase = (label, input) => {
+    const tiptapOut = tiptapRoundTrip(input);
+    const canonical = canonicalize(tiptapOut);
+
+    const { added, removed, extraBlankLines } = diffTolerated(tiptapOut, canonical, label);
+
+    for (const { char } of added) {
+      assert.ok(
+        PERMITTED_ADDED_ESCAPES.has(char),
+        `NEW ADDED-ESCAPE DIVERGENCE: canonicalize added an escape before ` +
+          `${JSON.stringify(char)} in case "${label}", which PERMITTED_ADDED_ESCAPES ` +
+          `does not permit. Either TipTap's serializer stopped escaping something, or ` +
+          `canonicalize started escaping something new.`,
+      );
+      observedAdded.add(char);
+    }
+
+    for (const { char } of removed) {
+      assert.ok(
+        PERMITTED_REMOVED_ESCAPES.has(char),
+        `NEW REMOVED-ESCAPE DIVERGENCE: canonicalize removed an escape before ` +
+          `${JSON.stringify(char)} in case "${label}", which PERMITTED_REMOVED_ESCAPES ` +
+          `does not permit. Either TipTap's serializer started escaping something, or ` +
+          `canonicalize stopped escaping something.`,
+      );
+      observedRemoved.add(char);
+    }
+
+    for (const { kind } of extraBlankLines) {
+      assert.ok(
+        PERMITTED_EXTRA_BLANK_LINES.has(kind),
+        `NEW BLANK-LINE DIVERGENCE: canonicalize removed a blank line ${kind} in case ` +
+          `"${label}", which PERMITTED_EXTRA_BLANK_LINES does not permit. Either ` +
+          `TipTap's serializer changed its block spacing, or canonicalize started ` +
+          `collapsing blank lines somewhere new.`,
+      );
+      observedBlankLines.add(kind);
+    }
+
+    // Whatever differed, canonicalize must not churn further next pass.
+    assert.equal(canonicalize(canonical), canonical, 'canonicalize is not stable on TipTap output');
+  };
+
   for (const [label, input] of CASES) {
     await t.test(label, () => {
-      const tiptapOut = tiptapRoundTrip(input);
-      const canonical = canonicalize(tiptapOut);
-
-      const { added, removed, extraBlankLines } = diffTolerated(tiptapOut, canonical, label);
-
-      for (const { char } of added) {
-        assert.ok(
-          PERMITTED_ADDED_ESCAPES.has(char),
-          `NEW ADDED-ESCAPE DIVERGENCE: canonicalize added an escape before ` +
-            `${JSON.stringify(char)} in case "${label}", which PERMITTED_ADDED_ESCAPES ` +
-            `does not permit. Either TipTap's serializer stopped escaping something, or ` +
-            `canonicalize started escaping something new.`,
-        );
-        observedAdded.add(char);
+      try {
+        runCase(label, input);
+      } catch (error) {
+        caseFailures += 1;
+        throw error;
       }
-
-      for (const { char } of removed) {
-        assert.ok(
-          PERMITTED_REMOVED_ESCAPES.has(char),
-          `NEW REMOVED-ESCAPE DIVERGENCE: canonicalize removed an escape before ` +
-            `${JSON.stringify(char)} in case "${label}", which PERMITTED_REMOVED_ESCAPES ` +
-            `does not permit. Either TipTap's serializer started escaping something, or ` +
-            `canonicalize stopped escaping something.`,
-        );
-        observedRemoved.add(char);
-      }
-
-      for (const { kind } of extraBlankLines) {
-        assert.ok(
-          PERMITTED_EXTRA_BLANK_LINES.has(kind),
-          `NEW BLANK-LINE DIVERGENCE: canonicalize removed a blank line ${kind} in case ` +
-            `"${label}", which PERMITTED_EXTRA_BLANK_LINES does not permit. Either ` +
-            `TipTap's serializer changed its block spacing, or canonicalize started ` +
-            `collapsing blank lines somewhere new.`,
-        );
-        observedBlankLines.add(kind);
-      }
-
-      // Whatever differed, canonicalize must not churn further next pass.
-      assert.equal(canonicalize(canonical), canonical, 'canonicalize is not stable on TipTap output');
     });
   }
 
@@ -188,6 +203,8 @@ test('TipTap is a fixed point of canonicalize, up to pinned differences', async 
   // producing one of the permitted differences, that is a fixture regression and must
   // fail as one, because a permitted difference nothing exercises is slack that
   // pre-tolerates a future divergence. Each set gets its own message.
+  if (caseFailures > 0) return; // incomplete run — see the note above the loop
+
   for (const [setName, permitted, observed] of [
     ['PERMITTED_ADDED_ESCAPES', PERMITTED_ADDED_ESCAPES, observedAdded],
     ['PERMITTED_REMOVED_ESCAPES', PERMITTED_REMOVED_ESCAPES, observedRemoved],
