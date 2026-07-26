@@ -72,10 +72,10 @@ export const checkpoint = commitHumanTurn;
  * session worth keeping. See the report for the §3/§2.4 tension.
  *
  * @param {object} doc
- * @param {{draft: string, prompt: string, warnings?: string[], now?: Date}} options
+ * @param {{draft: string, prompt: string, warnings?: string[], stripped?: Record<string, number>, now?: Date}} options
  * @returns {{doc: object, turn: object}}
  */
-export function commitAiTurn(doc, { draft, prompt, warnings, now = new Date() }) {
+export function commitAiTurn(doc, { draft, prompt, warnings, stripped, now = new Date() }) {
   assertLedgerInvariant(doc);
 
   if (typeof prompt !== 'string' || prompt.trim() === '') {
@@ -93,6 +93,11 @@ export function commitAiTurn(doc, { draft, prompt, warnings, now = new Date() })
     snapshot: canonicalize(draft),
   };
   if (warnings?.length) turn.warnings = [...warnings];
+
+  // §2.3 requires the stripped counts as structured data on the turn, not only as
+  // a formatted string, so the history view can render them and an export can
+  // aggregate them.
+  if (stripped && Object.keys(stripped).length > 0) turn.stripped = { ...stripped };
 
   return { doc: appendTurn(doc, turn), turn };
 }
@@ -112,7 +117,13 @@ export function commitAiTurn(doc, { draft, prompt, warnings, now = new Date() })
  * @param {{pendingDraft: string, prompt: string, callModel: Function, now?: Date}} options
  * @returns {Promise<{doc: object, humanTurn: object|null, aiTurn: object}>}
  */
-export async function submitAiPrompt(doc, { pendingDraft, prompt, callModel, now = () => new Date() }) {
+export async function submitAiPrompt(doc, {
+  pendingDraft,
+  prompt,
+  callModel,
+  onHumanTurn,
+  now = () => new Date(),
+}) {
   if (typeof callModel !== 'function') {
     throw new TypeError('submitAiPrompt needs a callModel function');
   }
@@ -120,15 +131,22 @@ export async function submitAiPrompt(doc, { pendingDraft, prompt, callModel, now
   // Step 2: pending human edits become their own turn. Skipped when unchanged.
   const { doc: afterHuman, turn: humanTurn } = commitHumanTurn(doc, pendingDraft, { now: now() });
 
+  // §2.4: a failure in steps 4-6 leaves the draft at the state after step 2, and
+  // the human turn stays committed because it represents real work. That only
+  // holds if the human turn reaches disk BEFORE the model is called — hence this
+  // hook, which the caller uses to persist.
+  await onHumanTurn?.({ doc: afterHuman, turn: humanTurn });
+
   // Steps 4-5: the model sees the draft as of the human turn.
   const result = await callModel({ doc: afterHuman, draft: afterHuman.draft, prompt, humanTurn });
   const revised = typeof result === 'string' ? { draft: result } : result;
 
-  // Step 6: the AI turn. A failure above leaves the human turn committed (§2.4).
+  // Step 6: the AI turn.
   const { doc: afterAi, turn: aiTurn } = commitAiTurn(afterHuman, {
     draft: revised.draft,
     prompt,
     warnings: revised.warnings,
+    stripped: revised.stripped,
     now: now(),
   });
 

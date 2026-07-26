@@ -345,6 +345,11 @@ Turn boundaries:
   (b) the human submits an AI prompt (see 2.4 step 2).
 - If the draft is unchanged since the last turn, don't create an empty turn.
 
+  This applies to human turns only. An AI turn always commits, even
+  when the model returned identical text. The prompt is provenance, and
+  a prompt that changed nothing is a real fact about the session that
+  would otherwise leave no trace.
+
 Rule (b) is load-bearing. Verify it explicitly: hand-edit, then prompt, then confirm
 the history shows a human turn containing only the hand edits, followed by an AI turn
 containing only the model's changes.
@@ -366,6 +371,10 @@ containing only the model's changes.
 - **"Restore to this turn" on every entry. v1, not a nice-to-have.** Sets the working
   draft to that turn's snapshot and appends a new human turn (never rewrites history).
   Without this, a bad AI turn is destructive.
+
+  Restoring to a turn the draft already matches creates no turn, per
+  the no-empty-turn rule. The UI must not report a restore that did not
+  happen.
 
 ## 5. Tech constraints
 - React frontend. Editor: TipTap with `tiptap-markdown` plus `@tiptap/extension-link`.
@@ -495,8 +504,12 @@ accumulating silently across passes.
 
    Deferred by priority, not dependency — the test is headless and could run now, but
    storage and the turn model are what stand between here and a runnable smoke session.
-7. History view: diffs, read-only turn view, restore
-8. Everything else
+7. The editor and AI side panel. TipTap per §5, the prompt box per §2,
+   Checkpoint, and the §0.2 editor lock. This is the first point at
+   which the app can be used to write, and it comes before the history
+   view because the history view needs real sessions to look at.
+8. History view: diffs, read-only turn view, restore
+9. Everything else
 
 Do not proceed past step 1 until the canonicalize tests pass. Everything downstream
 depends on one dialect being real.
