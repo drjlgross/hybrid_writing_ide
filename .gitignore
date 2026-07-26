@@ -3,3 +3,4 @@ node_modules/
 documents/
 *.tmp
 .tmp-test/
+.env
