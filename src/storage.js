@@ -8,6 +8,10 @@
  *
  * Canonicalize runs here, on the write path into the snapshot store, which is one
  * of the exactly two places §0.1 permits.
+ *
+ * Every function here takes the namespace as its `dir` (§0.5). Storage itself knows
+ * nothing about tokens — it is handed a directory and files documents in it, which
+ * is what keeps namespace resolution confined to the one function in namespace.js.
  */
 
 import {
@@ -23,9 +27,16 @@ import {
 import { dirname, join } from 'node:path';
 
 import { canonicalize } from './canonicalize.js';
+import { defaultNamespace } from './namespace.js';
 
 export const SCHEMA_VERSION = 1;
-export const DEFAULT_DOCUMENTS_DIR = 'documents';
+
+/**
+ * The local-development namespace (§0.5's fixed default token), NOT bare
+ * `documents/`. Every document now lives under a namespace, so a default that
+ * pointed at the root would let a caller quietly file a document nowhere.
+ */
+export const DEFAULT_DOCUMENTS_DIR = defaultNamespace().dir;
 
 /** Thrown when the ledger and the working draft disagree (§0.3). */
 export class LedgerInvariantError extends Error {

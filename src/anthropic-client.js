@@ -16,6 +16,20 @@ export const MODEL = 'claude-sonnet-5';
 export const API_URL = 'https://api.anthropic.com/v1/messages';
 export const API_VERSION = '2023-06-01';
 
+/**
+ * How long to wait for the whole response before giving up.
+ *
+ * §0.6 rules out streaming, so a long draft is one long non-streaming request and
+ * the only wrong answer is to wait forever: without this, a hung connection holds
+ * the editor locked (§0.2) with no error and no way back except a reload. Two
+ * minutes is well past a normal turn at the §2.3 token ceiling and well short of
+ * "the tab is broken".
+ *
+ * A timeout aborts before any response exists, so it lands in the §2.4 window
+ * where the draft is unchanged and the human turn stays committed.
+ */
+export const REQUEST_TIMEOUT_MS = 120_000;
+
 /** §6, verbatim. */
 export const SYSTEM_PROMPT = `You are collaborating on a text with a human editor. The draft is in Markdown; the
 only formatting in use is bold, italic, bullet lists, and inline links (\`[text](url)\`).
@@ -63,11 +77,16 @@ export function buildUserMessage({ draft, prompt, humanEditDiff }) {
 /**
  * Build a caller for the real API.
  *
- * @param {{apiKey?: string, fetchImpl?: typeof fetch, model?: string}} [options]
+ * @param {{apiKey?: string, fetchImpl?: typeof fetch, model?: string, timeoutMs?: number}} [options]
  * @returns {(input: {draft: string, prompt: string, humanEditDiff?: string|null}) => Promise<object>}
  *   resolves to the raw response body, which §2.3's guards then validate
  */
-export function createModelCaller({ apiKey, fetchImpl = fetch, model = MODEL } = {}) {
+export function createModelCaller({
+  apiKey,
+  fetchImpl = fetch,
+  model = MODEL,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+} = {}) {
   const key = apiKey ?? process.env.ANTHROPIC_API_KEY;
   if (!key) {
     throw new Error(
@@ -77,20 +96,34 @@ export function createModelCaller({ apiKey, fetchImpl = fetch, model = MODEL } =
   }
 
   return async function callModel({ draft, prompt, humanEditDiff }) {
-    const response = await fetchImpl(API_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': API_VERSION,
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokensForDraft(draft),
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: buildUserMessage({ draft, prompt, humanEditDiff }) }],
-      }),
-    });
+    let response;
+    try {
+      response = await fetchImpl(API_URL, {
+        method: 'POST',
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': API_VERSION,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokensForDraft(draft),
+          system: SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: buildUserMessage({ draft, prompt, humanEditDiff }) }],
+        }),
+      });
+    } catch (error) {
+      // A bare `TimeoutError` reaching the UI reads as a bug in the app. Say what
+      // happened and, above all, that the draft survived it.
+      if (error?.name === 'TimeoutError') {
+        throw new Error(
+          `the model API did not respond within ${Math.round(timeoutMs / 1000)}s and the ` +
+            'request was aborted. The draft is unchanged and nothing was committed.',
+        );
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '');

@@ -15,8 +15,9 @@
 
 import { existsSync, unlinkSync } from 'node:fs';
 
+import { DEFAULT_TOKEN } from '../src/addressing.js';
+import { defaultNamespace } from '../src/namespace.js';
 import {
-  DEFAULT_DOCUMENTS_DIR,
   assertLedgerInvariant,
   createDocument,
   documentPath,
@@ -27,8 +28,11 @@ import { commitHumanTurn, restoreToTurn, submitAiPrompt } from '../src/turns.js'
 
 const SLUG = 'smoke';
 
+// §0.5: documents live under a namespace, `documents/{token}/{slug}.json`. The
+// smoke session drives the store directly, so it resolves the namespace the same
+// way the server does rather than assuming a directory layout.
 const argDir = process.argv.indexOf('--dir');
-const DIR = argDir === -1 ? DEFAULT_DOCUMENTS_DIR : process.argv[argDir + 1];
+const DIR = argDir === -1 ? defaultNamespace().dir : process.argv[argDir + 1];
 
 // A throw from anywhere in the session — a broken invariant, a missing turn — should
 // read as a smoke-test failure, not as a stack trace with no context.
@@ -92,6 +96,10 @@ let doc = createDocument({ slug: SLUG, dir: DIR });
 check(doc.slug === SLUG, `slug is "${SLUG}"`);
 check(doc.schema_version === 1, 'schema_version is present from turn zero');
 check(doc.history.length === 0, 'a new document has no turns');
+check(
+  argDir !== -1 || path === `documents/${DEFAULT_TOKEN}/${SLUG}.json`,
+  `the file lands inside a namespace, not loose in documents/ (§0.5): ${path}`,
+);
 checkInvariant(doc, 'creation');
 
 // (b) commit a human turn: bold, a bullet, and a link

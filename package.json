@@ -4,7 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "smoke": "node scripts/smoke-session.js",
+    "start": "node scripts/serve.js",
+    "dev": "vite",
+    "build": "vite build",
+    "new-token": "node scripts/new-token.js",
+    "live-check": "node scripts/live-check.js"
   },
   "dependencies": {
     "@tiptap/core": "^3.29.0",
@@ -18,6 +24,8 @@
     "@tiptap/extension-text": "^3.29.0",
     "diff": "^9.0.0",
     "express": "^5.2.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "remark": "^15.0.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
@@ -25,6 +33,7 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "vite": "^8.1.5"
   }
 }

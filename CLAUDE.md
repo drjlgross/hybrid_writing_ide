@@ -238,6 +238,23 @@ This is a decision, not an oversight. Do not "optimize" it into deltas.
 ### 0.5 Storage shape
 - One file per document: `documents/{slug}.json`. Not one global file — the migration
   from one document to many is annoying and costs nothing to avoid now.
+- Documents are namespaced by a capability token:
+  `documents/{token}/{slug}.json`. A token is an unguessable string
+  handed to one person as part of their URL. There is no login and no
+  account; the token IS the identity, and anyone holding the link has
+  full access to that namespace. This is a filing system for a small
+  group of known people, not access control, and it must be described
+  that way to anyone given a link. Slugs collide only within a
+  namespace. Local single-user development uses a fixed default token.
+- Tokens are crypto-random, 32 hex characters, generated with
+  `node:crypto`. Reject any token that is not exactly 32 hex characters
+  rather than sanitizing it — a sanitized `../../etc` is a path
+  traversal. No endpoint lists namespaces or reads across them.
+- The server resolves the namespace in exactly one function. No handler
+  reads the token directly. Replacing capability tokens with real
+  accounts must be a change to that function and nothing else.
+- A document is addressed as `/t/{token}/{slug}`. A missing slug
+  resolves to a default document in that namespace.
 - The human supplies the slug when creating a document. Sanitize it (lowercase,
   alphanumeric + hyphens, collapse repeats) and refuse collisions rather than
   silently overwriting. If no slug is given, generate one from a timestamp.
@@ -467,6 +484,10 @@ accumulating silently across passes.
 - Drag-to-reorder paragraph blocks
 - Rendered diffs in the history view
 - Export history as JSON/markdown report
+- Bring-your-own-key: accept an API key from the client and use it in
+  place of the server's. Small on its own. Does not make the app
+  multi-user, because §0.5's namespaces are capability tokens rather
+  than accounts.
 
 ## 9. Build order
 1. `canonicalize()` + its tests per §0.1 (idempotence, fixed point up to escape
@@ -500,16 +521,26 @@ accumulating silently across passes.
 
 5. AI endpoint with the full 2.4 sequence and 2.3 guards, including the out-of-dialect
    construct check
-6. HTML clipboard fixture per §5
-
-   Deferred by priority, not dependency — the test is headless and could run now, but
-   storage and the turn model are what stand between here and a runnable smoke session.
-7. The editor and AI side panel. TipTap per §5, the prompt box per §2,
+6. The editor and AI side panel. TipTap per §5, the prompt box per §2,
    Checkpoint, and the §0.2 editor lock. This is the first point at
    which the app can be used to write, and it comes before the history
    view because the history view needs real sessions to look at.
+
+   Swapped ahead of the clipboard fixture: the clipboard fixture is headless and can
+   run any time, and the editor is what makes the app usable and testable by a human.
+7. HTML clipboard fixture per §5
+
+   Deferred by priority, not dependency — the test is headless and could run now, but
+   storage and the turn model are what stand between here and a runnable smoke session.
 8. History view: diffs, read-only turn view, restore
-9. Everything else
+9. Deploy. A hosted URL for a small group of known people. Target is
+   Railway, which deploys from GitHub and offers a persistent volume:
+   §0.5 stores documents as files, and an ephemeral filesystem loses
+   every draft on redeploy. Pin the Node version in package.json so the
+   host does not pick one. Express serves the built client assets, so
+   this runs as one process rather than two services. The API key stays
+   server-side per §0.6 and is the operator's, not the visitor's.
+10. Everything else
 
 Do not proceed past step 1 until the canonicalize tests pass. Everything downstream
 depends on one dialect being real.

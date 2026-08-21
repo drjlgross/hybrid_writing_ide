@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { runAiEdit, humanEditDiff } from '../src/ai-edit.js';
 import { buildUserMessage, SYSTEM_PROMPT } from '../src/anthropic-client.js';
 import { createServer } from '../src/server.js';
+import { generateToken, resolveNamespace } from '../src/namespace.js';
 import { createDocument, loadDocument, saveDocument } from '../src/storage.js';
 import { commitHumanTurn } from '../src/turns.js';
 
@@ -22,6 +23,17 @@ const TMP_ROOT = fileURLToPath(new URL('../.tmp-test/', import.meta.url));
 function freshDir() {
   mkdirSync(TMP_ROOT, { recursive: true });
   return mkdtempSync(join(TMP_ROOT, 'ai-edit-'));
+}
+
+/**
+ * A namespace root plus one token in it (§0.5). The HTTP tests address documents
+ * the way the app does — through `/api/t/{token}/…` — so the routes, the token
+ * check, and the one resolver function are all exercised, not bypassed.
+ */
+function freshNamespace() {
+  const root = freshDir();
+  const token = generateToken();
+  return { root, token, dir: resolveNamespace(token, { root }).dir };
 }
 
 const ok = (text, overrides = {}) => ({
@@ -235,17 +247,17 @@ test('§6: the payload carries the system prompt, the diff, the instruction, and
 });
 
 test('POST /ai-edit runs the sequence and returns the draft with turn metadata', async () => {
-  const dir = freshDir();
+  const { root, token, dir } = freshNamespace();
   seed(dir, 'endpoint', 'The endpoint draft, long enough to keep the shrink guard quiet.\n');
 
   const app = createServer({
-    dir,
+    root,
     callModel: async () => ok('The revised endpoint draft, long enough to keep things quiet.\n'),
   });
   const { url, close } = await serve(app);
 
   try {
-    const { status, body } = await post(`${url}/ai-edit`, {
+    const { status, body } = await post(`${url}/api/t/${token}/ai-edit`, {
       slug: 'endpoint',
       prompt: 'tighten it',
       pendingDraft: 'The endpoint draft, hand edited, long enough to keep things quiet.\n',
@@ -263,17 +275,20 @@ test('POST /ai-edit runs the sequence and returns the draft with turn metadata',
 });
 
 test('POST /ai-edit surfaces a §2.3 failure as an error, saying the draft is unchanged', async () => {
-  const dir = freshDir();
+  const { root, token, dir } = freshNamespace();
   seed(dir, 'guarded', 'The guarded draft, which must survive a bad response intact.\n');
 
   const app = createServer({
-    dir,
+    root,
     callModel: async () => ok('cut off half way', { stop_reason: 'max_tokens' }),
   });
   const { url, close } = await serve(app);
 
   try {
-    const { status, body } = await post(`${url}/ai-edit`, { slug: 'guarded', prompt: 'expand it' });
+    const { status, body } = await post(`${url}/api/t/${token}/ai-edit`, {
+      slug: 'guarded',
+      prompt: 'expand it',
+    });
 
     assert.equal(status, 502);
     assert.equal(body.draft_unchanged, true, 'the UI has to be able to tell the human their text is safe');
@@ -291,15 +306,16 @@ test('POST /ai-edit surfaces a §2.3 failure as an error, saying the draft is un
 });
 
 test('POST /ai-edit validates its inputs and reports a missing document', async () => {
-  const dir = freshDir();
-  const app = createServer({ dir, callModel: async () => ok('unused\n') });
+  const { root, token } = freshNamespace();
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
   const { url, close } = await serve(app);
+  const base = `${url}/api/t/${token}`;
 
   try {
-    assert.equal((await post(`${url}/ai-edit`, { prompt: 'p' })).status, 400);
-    assert.equal((await post(`${url}/ai-edit`, { slug: 's' })).status, 400);
-    assert.equal((await post(`${url}/ai-edit`, { slug: 's', prompt: '   ' })).status, 400);
-    assert.equal((await post(`${url}/ai-edit`, { slug: 'no-such-doc', prompt: 'p' })).status, 404);
+    assert.equal((await post(`${base}/ai-edit`, { prompt: 'p' })).status, 400);
+    assert.equal((await post(`${base}/ai-edit`, { slug: 's' })).status, 400);
+    assert.equal((await post(`${base}/ai-edit`, { slug: 's', prompt: '   ' })).status, 400);
+    assert.equal((await post(`${base}/ai-edit`, { slug: 'no-such-doc', prompt: 'p' })).status, 404);
   } finally {
     await close();
   }
@@ -310,7 +326,7 @@ test('the server never needs an API key to be constructed', () => {
   const previous = process.env.ANTHROPIC_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
   try {
-    assert.doesNotThrow(() => createServer({ callModel: async () => ok('x\n'), dir: freshDir() }));
+    assert.doesNotThrow(() => createServer({ callModel: async () => ok('x\n'), root: freshDir() }));
   } finally {
     if (previous !== undefined) process.env.ANTHROPIC_API_KEY = previous;
   }

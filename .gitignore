@@ -4,3 +4,4 @@ documents/
 *.tmp
 .tmp-test/
 .env
+client/dist/
