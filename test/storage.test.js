@@ -21,6 +21,7 @@ import {
   createDocument,
   documentExists,
   documentPath,
+  listDocuments,
   loadDocument,
   sanitizeSlug,
   saveDocument,
@@ -308,4 +309,69 @@ test('saveDocument refuses a schema_version it does not write', () => {
   const doc = createDocument({ slug: 'versioned', dir });
   assert.throws(() => saveDocument({ ...doc, schema_version: 99 }, { dir }), /refusing to write/);
   assert.throws(() => saveDocument({ ...doc, slug: undefined }, { dir }), /no slug/);
+});
+
+// ── listDocuments: one namespace, and only one (chunk 7 item 4) ────────────────
+
+test('listDocuments returns this directory only, newest activity first', () => {
+  const dir = freshDir();
+  const sibling = freshDir(); // stands in for another namespace under the same root
+
+  createDocument({ slug: 'alpha', dir, now: new Date('2026-01-01T00:00:00.000Z') });
+  createDocument({ slug: 'beta', dir, now: new Date('2026-01-02T00:00:00.000Z') });
+  createDocument({ slug: 'not-yours', dir: sibling });
+
+  // Give alpha a turn dated after beta's creation, so ordering is by ACTIVITY
+  // rather than by creation or by filename.
+  const alpha = loadDocument('alpha', { dir });
+  saveDocument(
+    {
+      ...alpha,
+      draft: 'Alpha moved.\n',
+      history: [
+        {
+          turn_id: 1,
+          timestamp: '2026-03-01T00:00:00.000Z',
+          author: 'human',
+          snapshot: 'Alpha moved.\n',
+        },
+      ],
+    },
+    { dir },
+  );
+
+  const listed = listDocuments({ dir });
+
+  assert.deepEqual(
+    listed.map((doc) => doc.slug),
+    ['alpha', 'beta'],
+    'alpha edited most recently, and the sibling directory is invisible',
+  );
+  assert.equal(listed[0].turns, 1);
+  assert.equal(listed[1].turns, 0);
+  assert.equal(listed[0].updated_at, '2026-03-01T00:00:00.000Z');
+
+  // The other direction, so this is scoping and not an artifact of ordering.
+  assert.deepEqual(listDocuments({ dir: sibling }).map((doc) => doc.slug), ['not-yours']);
+});
+
+test('listDocuments ignores a write in flight and reports an unreadable file', () => {
+  const dir = freshDir();
+  createDocument({ slug: 'good', dir });
+
+  // A `.json.tmp` is a half-written atomic write (§0.5). It is not a document.
+  writeFileSync(join(dir, 'good.json.tmp'), '{"partial":');
+  // A file that will not parse IS a document, as far as the human is concerned.
+  writeFileSync(join(dir, 'broken.json'), 'this is not json');
+
+  const listed = listDocuments({ dir });
+
+  assert.deepEqual(listed.map((doc) => doc.slug).sort(), ['broken', 'good']);
+  const broken = listed.find((doc) => doc.slug === 'broken');
+  assert.ok(broken.unreadable, 'an unparseable document is shown as broken, never dropped');
+  assert.equal(listed.find((doc) => doc.slug === 'good').unreadable, undefined);
+});
+
+test('listDocuments on a namespace that was never written to returns []', () => {
+  assert.deepEqual(listDocuments({ dir: join(freshDir(), 'never-created') }), []);
 });

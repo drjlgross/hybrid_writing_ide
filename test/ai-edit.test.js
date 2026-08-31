@@ -190,6 +190,26 @@ test('the shrink warning lands on the turn, and the turn still commits', async (
   assert.match(result.aiTurn.warnings[0], /shorter than before this turn/);
 });
 
+test('a shrink asked for still warns on the turn, in softened words (chunk 7 item 6)', async () => {
+  const dir = freshDir();
+  seed(dir, 'asked-shrink', 'A long draft with several sentences in it. Here is another one. And a third.\n');
+
+  const result = await runAiEdit({
+    slug: 'asked-shrink',
+    dir,
+    prompt: 'tighten the second paragraph',
+    callModel: async () => ok('Short.\n'),
+  });
+
+  assert.equal(result.draft, 'Short.\n', 'the turn committed');
+  assert.equal(
+    result.aiTurn.warnings.length,
+    1,
+    'a requested cut is still a 90% shrink, and the history has to say so',
+  );
+  assert.match(result.aiTurn.warnings[0], /did ask for cutting/);
+});
+
 test('no empty human turn when nothing was typed since the last turn', async () => {
   const dir = freshDir();
   const seeded = seed(dir, 'nopending', 'Unchanged draft that is long enough to be uninteresting.\n');

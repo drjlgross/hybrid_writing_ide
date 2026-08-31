@@ -21,7 +21,9 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -283,4 +285,54 @@ export function loadDocument(slug, { dir = DEFAULT_DOCUMENTS_DIR } = {}) {
 /** True if a document with this slug exists. */
 export function documentExists(slug, { dir = DEFAULT_DOCUMENTS_DIR } = {}) {
   return existsSync(documentPath(slug, dir));
+}
+
+/**
+ * Every document in ONE namespace (§0.5).
+ *
+ * `dir` is a resolved namespace directory and nothing else — there is no argument
+ * that widens the scope, and no caller can pass the documents root, because the
+ * only thing that produces a `dir` is `resolveNamespace`. A listing that could
+ * walk upward would turn a capability token into a directory of everyone's
+ * drafts, which is the one thing §0.5 says must not exist.
+ *
+ * A file that will not parse is REPORTED, not skipped and not thrown: skipping it
+ * makes a document silently vanish from the human's list while its bytes are still
+ * on disk, which is worse than a row that says something is wrong.
+ *
+ * @param {{dir?: string}} [options]
+ * @returns {Array<{slug: string, created_at: string|null, turns: number,
+ *   updated_at: string|null, unreadable?: string}>} newest activity first
+ */
+export function listDocuments({ dir = DEFAULT_DOCUMENTS_DIR } = {}) {
+  if (!existsSync(dir)) return []; // a namespace nobody has written to yet
+
+  const entries = readdirSync(dir)
+    .filter((name) => name.endsWith('.json')) // never the `.json.tmp` of a write in flight
+    .sort();
+
+  return entries
+    .map((name) => {
+      const slug = name.slice(0, -'.json'.length);
+      const path = join(dir, name);
+      try {
+        const doc = JSON.parse(readFileSync(path, 'utf8'));
+        const last = doc.history?.[doc.history.length - 1];
+        return {
+          slug: doc.slug ?? slug,
+          created_at: doc.created_at ?? null,
+          turns: Array.isArray(doc.history) ? doc.history.length : 0,
+          updated_at: last?.timestamp ?? doc.created_at ?? null,
+        };
+      } catch (error) {
+        return {
+          slug,
+          created_at: null,
+          turns: 0,
+          updated_at: statSync(path).mtime.toISOString(),
+          unreadable: error.message,
+        };
+      }
+    })
+    .sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')));
 }

@@ -79,8 +79,25 @@ export async function render(element) {
     });
   };
 
+  /**
+   * Run something that mutates state OUTSIDE React — a TipTap command, say —
+   * inside an act() scope.
+   *
+   * Toolbar subscribes to the editor's `selectionUpdate` and `transaction`
+   * events and calls setState from them, so any direct editor command in a test
+   * is a React state update React cannot see coming. Without this the suite
+   * passes while printing "an update was not wrapped in act(...)", and the
+   * render it warns about is genuinely not flushed before the next assertion.
+   */
+  const actIn = async (fn) => {
+    await act(async () => {
+      await fn();
+    });
+  };
+
   return {
     container,
+    act: actIn,
     flush,
     find,
     findAll,

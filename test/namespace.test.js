@@ -336,3 +336,120 @@ test('the whole /ai-edit sequence runs inside a namespace', async () => {
     await close();
   }
 });
+
+// ── the within-namespace document listing (chunk 7 item 4) ─────────────────────
+
+test('GET /library lists this namespace and cannot see any other', async () => {
+  const root = freshRoot();
+  const mine = generateToken();
+  const theirs = generateToken();
+  const mineDir = resolveNamespace(mine, { root }).dir;
+  const theirsDir = resolveNamespace(theirs, { root }).dir;
+
+  createDocument({ slug: 'my-essay', dir: mineDir });
+  createDocument({ slug: 'my-notes', dir: mineDir });
+  createDocument({ slug: 'their-secret', dir: theirsDir });
+
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+
+  try {
+    const { status, body } = await call(`${url}/api/t/${mine}/library`);
+    assert.equal(status, 200);
+
+    const slugs = body.documents.map((doc) => doc.slug).sort();
+    assert.deepEqual(slugs, ['my-essay', 'my-notes']);
+    assert.equal(
+      JSON.stringify(body).includes('their-secret'),
+      false,
+      'a capability token must not reveal that another namespace holds anything',
+    );
+
+    // And the other direction, so this is scoping rather than an accident of order.
+    const other = await call(`${url}/api/t/${theirs}/library`);
+    assert.deepEqual(other.body.documents.map((doc) => doc.slug), ['their-secret']);
+  } finally {
+    await close();
+  }
+});
+
+test('no route lists namespaces or reads across them (§0.5)', async () => {
+  const root = freshRoot();
+  const token = generateToken();
+  createDocument({ slug: 'private', dir: resolveNamespace(token, { root }).dir });
+
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+
+  try {
+    // Every shape of "show me everything" that a reader of the URL scheme would
+    // try. None may return a document listing.
+    for (const path of [
+      '/api/library',
+      '/api/t/library',
+      '/api/t//library',
+      '/api/namespaces',
+      '/api/t',
+    ]) {
+      const { status, body } = await call(`${url}${path}`);
+      assert.notEqual(status, 200, `${path} must not answer`);
+      assert.equal(
+        JSON.stringify(body).includes('private'),
+        false,
+        `${path} must not name a document`,
+      );
+    }
+
+    // A bad token is refused rather than treated as "list them all".
+    const bad = await call(`${url}/api/t/not-a-token/library`);
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.invalid_token, true);
+  } finally {
+    await close();
+  }
+});
+
+test('a namespace with nothing in it lists nothing, and does not fail', async () => {
+  const root = freshRoot();
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+
+  try {
+    const { status, body } = await call(`${url}/api/t/${generateToken()}/library`);
+    assert.equal(status, 200);
+    assert.deepEqual(body.documents, []);
+  } finally {
+    await close();
+  }
+});
+
+test('GET /documents still means the default document, not the listing', async () => {
+  // The listing lives at its own address precisely so §0.5's missing-slug rule
+  // keeps working. If the two ever merge, a fresh link stops opening onto
+  // something writable — so assert both answers from one namespace at once.
+  const root = freshRoot();
+  const token = generateToken();
+  const dir = resolveNamespace(token, { root }).dir;
+  createDocument({ slug: 'one', dir });
+  createDocument({ slug: 'two', dir });
+
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+
+  try {
+    const bare = await call(`${url}/api/t/${token}/documents`);
+    assert.equal(bare.status, 200);
+    assert.equal(bare.body.slug, DEFAULT_SLUG, 'still the default document');
+    assert.equal(Array.isArray(bare.body.history), true, 'still a document, not a list');
+    assert.equal(bare.body.documents, undefined, 'and not a listing');
+
+    const list = await call(`${url}/api/t/${token}/library`);
+    assert.deepEqual(
+      list.body.documents.map((doc) => doc.slug).sort(),
+      ['draft', 'one', 'two'],
+      'the listing sees the default document the bare GET just created, and the rest',
+    );
+  } finally {
+    await close();
+  }
+});

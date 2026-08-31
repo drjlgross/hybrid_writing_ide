@@ -25,6 +25,7 @@ import {
   SlugCollisionError,
   createDocument,
   documentExists,
+  listDocuments,
   loadDocument,
   saveDocument,
 } from './storage.js';
@@ -106,6 +107,22 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
       res.status(error.code === 'ENOENT' ? 404 : 500).json({ error: error.message });
     }
   }
+
+  /**
+   * Everything in THIS namespace and nothing else (§0.5).
+   *
+   * Not `GET /documents`: that address already means "the default document",
+   * which is §0.5's missing-slug rule and is load-bearing — a fresh link has to
+   * open onto something writable. Hence a separate name rather than a breaking
+   * change to a rule the spec pins. Reported as a finding.
+   *
+   * There is deliberately no route above this one — nothing enumerates
+   * namespaces, and the handler cannot: it is given a directory by
+   * `withNamespace` and never sees a token.
+   */
+  api.get('/library', (req, res) => {
+    res.json({ documents: listDocuments({ dir: req.namespace.dir }) });
+  });
 
   api.get('/documents', (req, res) => readDocument(req.namespace.dir, undefined, res));
   api.get('/documents/:slug', (req, res) => readDocument(req.namespace.dir, req.params.slug, res));

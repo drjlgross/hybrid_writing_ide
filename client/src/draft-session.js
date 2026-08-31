@@ -17,7 +17,7 @@
  * Keystrokes only bump a counter.
  */
 
-/** @typedef {'checkpoint'|'ai'|null} Pending */
+/** @typedef {'checkpoint'|'ai'|'create'|null} Pending */
 
 /**
  * The shape of the session state before anything has happened.
@@ -35,6 +35,11 @@ const INITIAL = {
   slug: null,
   draft: '',
   history: [],
+
+  /** Every document in this namespace (§0.5), for the document list. */
+  documents: [],
+  /** The address names a slug that does not exist. Offer to create it (§0.5). */
+  missing: false,
 
   /** What is in flight, if anything. Only one thing ever is. */
   pending: /** @type {Pending} */ (null),
@@ -81,6 +86,11 @@ export function createDraftSession({ api, editor, slug, onState }) {
    * snapshot".
    */
   async function load() {
+    // The list is refreshed either way. On the missing-slug screen it is the
+    // more useful half of the answer: "no document called that — here are the
+    // ones there are."
+    refreshLibrary();
+
     try {
       const doc = await api.load(state.slug);
       editor.setMarkdown(doc.draft);
@@ -89,12 +99,58 @@ export function createDraftSession({ api, editor, slug, onState }) {
         history: doc.history,
         loaded: true,
         dirty: false,
+        missing: false,
         error: null,
       });
       return doc;
     } catch (error) {
-      set({ error: describe(error), loaded: false });
+      // A 404 is not a failure to report — it is a document that does not exist
+      // yet, which §0.5 says the human may create deliberately. A bare error
+      // would leave them at a dead end holding a link they were given.
+      const missing = error?.status === 404;
+      set({ error: missing ? null : describe(error), missing, loaded: false });
+      if (missing) return null;
       throw error;
+    }
+  }
+
+  /**
+   * Refresh the document list. Never rejects and never sets `error`: a failed
+   * listing must not look like a failed draft load, because only one of those
+   * means the human's text is in doubt.
+   */
+  function refreshLibrary() {
+    return Promise.resolve()
+      .then(() => api.list())
+      .then((result) => set({ documents: result.documents ?? [] }))
+      .catch(() => set({ documents: [] }));
+  }
+
+  /**
+   * Create a document in this namespace (§0.5). The server sanitizes the slug and
+   * refuses collisions, so the slug that comes back may not be the one typed —
+   * hence everything downstream reads `doc.slug`, never the argument.
+   *
+   * Returns the created document. When it is the one the current address names,
+   * it is loaded in place; otherwise the caller navigates to it.
+   */
+  async function createDocumentHere(rawSlug) {
+    if (state.pending) return refuse();
+
+    set({ pending: 'create', error: null, notice: null });
+    try {
+      const doc = await api.create(rawSlug);
+      set({ pending: null });
+      await refreshLibrary();
+
+      if (doc.slug === state.slug) {
+        await load();
+        set({ notice: `created ${doc.slug}` });
+      }
+      return doc;
+    } catch (error) {
+      set({ pending: null, error: describe(error) });
+      return null;
     }
   }
 
@@ -212,7 +268,7 @@ export function createDraftSession({ api, editor, slug, onState }) {
       notice:
         state.pending === 'ai'
           ? 'an AI turn is already in flight — the editor stays locked until it lands'
-          : 'a checkpoint is already in flight',
+          : `a ${state.pending} is already in flight`,
     });
     return null;
   }
@@ -222,6 +278,8 @@ export function createDraftSession({ api, editor, slug, onState }) {
     noteEdit,
     checkpoint: checkpointNow,
     submitPrompt,
+    createDocument: createDocumentHere,
+    refreshLibrary,
     getState: () => state,
   };
 }

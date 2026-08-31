@@ -138,12 +138,33 @@ test('the 40% shrink guard warns but still commits', () => {
   assert.match(result.warnings[0], /\d+% shorter/, 'the warning must name the size of the drop');
   assert.match(result.warnings[0], /did not ask for cutting/);
 
-  // Asked for cutting → no warning.
+  // Asked for cutting → the warning is SOFTENED, never suppressed (chunk 7
+  // item 6). "Tighten the second paragraph" is both the instruction this
+  // heuristic matches and the instruction under which a model quietly drops a
+  // paragraph, so suppressing on a match turned the guard off in the exact case
+  // §2.3 wrote it for.
   for (const prompt of ['cut the second paragraph', 'make it shorter', 'tighten this up', 'condense', 'trim the fat']) {
     const asked = validateAiResponse(short, { draft: DRAFT, prompt });
-    assert.deepEqual(asked.warnings, [], `"${prompt}" reads as asking for cutting`);
-    assert.equal(asksForCutting(prompt), true);
+    assert.equal(asksForCutting(prompt), true, `"${prompt}" reads as asking for cutting`);
+
+    assert.equal(asked.warnings.length, 1, `"${prompt}" must still warn`);
+    assert.match(asked.warnings[0], /\d+% shorter/, 'and still name the size of the drop');
+    assert.match(asked.warnings[0], /did ask for cutting/, 'but say the instruction asked for it');
+    assert.doesNotMatch(
+      asked.warnings[0],
+      /did not ask for cutting/,
+      'the softened wording must not read as the unrequested-shrink one',
+    );
+    assert.match(
+      asked.warnings[0],
+      /nothing you meant to keep/,
+      'softened still means "check it", not "never mind"',
+    );
   }
+
+  // An instruction with no compression word in it keeps the blunt wording.
+  const blunt = validateAiResponse(short, { draft: DRAFT, prompt: 'make the tone more formal' });
+  assert.match(blunt.warnings[0], /did not ask for cutting/);
 
   // A small shrink is not warned about.
   const slightlyShorter = DRAFT.slice(0, Math.floor(DRAFT.length * 0.8));

@@ -8,6 +8,14 @@
     <!-- Nor in a referrer header on the way to a link the human clicked. -->
     <meta name="referrer" content="no-referrer" />
     <title>Co-writing draft</title>
+    <!-- Inlined as a data URI rather than a file: nothing extra to request, and
+         nothing to 404 when Express serves the built assets in a deployment.
+         Without it every tab shows the browser's blank-page glyph, which is what
+         a page that failed to load also shows. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23fbf9f5'/><path d='M9 7v18' stroke='%232f5d50' stroke-width='3' stroke-linecap='round'/><path d='M17 7v18' stroke='%238a5b12' stroke-width='3' stroke-linecap='round'/><path d='M25 11v10' stroke='%23ddd7cc' stroke-width='3' stroke-linecap='round'/></svg>"
+    />
   </head>
   <body>
     <div id="root"></div>

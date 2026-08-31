@@ -286,3 +286,150 @@ body {
 .meta dd {
   margin: 0;
 }
+
+/* ── the empty draft ─────────────────────────────────────────────────────── */
+
+/* An empty editor and an editor that failed to mount both render as nothing.
+   The border and the minimum height above belong to `.tiptap`, which only
+   exists once TipTap has actually mounted, so a bordered box of the right size
+   IS the evidence that the editor is alive. This placeholder says the other
+   half: the box is empty because the draft is empty. */
+.editor-placeholder {
+  position: absolute;
+  top: 2rem;
+  left: 2.25rem;
+  right: 2.25rem;
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+  /* Never intercept the click that places the caret in the editor beneath. */
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── the document list ───────────────────────────────────────────────────── */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: sticky;
+  top: 1.5rem;
+}
+
+/* The panel already sticks on its own; inside the rail that would fight. */
+.rail .panel {
+  position: static;
+  top: auto;
+}
+
+.library {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.85rem 1.1rem 1rem;
+}
+
+.library-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.library h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.library-form {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.library-form input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.doc-list {
+  list-style: none;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.doc {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.2rem 0;
+}
+
+.doc a {
+  color: var(--ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.doc a:hover {
+  text-decoration: underline;
+}
+
+.doc-current a {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.doc-meta {
+  flex: none;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.doc-bad {
+  color: var(--error);
+}
+
+/* ── an address naming a document that is not there ──────────────────────── */
+
+.missing {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2rem 2.25rem;
+}
+
+.missing h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+
+.missing p {
+  margin: 0 0 1.1rem;
+  color: var(--muted);
+  max-width: 56ch;
+}
+
+.missing .primary {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.missing .primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

@@ -48,6 +48,9 @@ export function createApi({ token, fetchImpl = fetch }) {
   const post = (path, payload) => request(path, { method: 'POST', body: JSON.stringify(payload) });
 
   return {
+    // Within this namespace only. There is no call that reaches another one —
+    // the token in `base` is the whole address space (§0.5).
+    list: () => request('/library'),
     load: (slug) => request(`/documents/${encodeURIComponent(slug)}`),
     create: (slug) => post('/documents', { slug }),
     checkpoint: (slug, pendingDraft) => post('/checkpoint', { slug, pendingDraft }),

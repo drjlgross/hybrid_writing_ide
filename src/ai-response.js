@@ -40,9 +40,18 @@ export function maxTokensForDraft(draft) {
 }
 
 /**
- * Did the instruction ask for cutting? Keyword heuristic, deliberately generous:
- * a false positive suppresses a warning, a false negative adds a warning to a
- * turn that deserved none. Both are recoverable; neither loses text.
+ * Did the instruction plausibly ask for compression? Keyword heuristic.
+ *
+ * It no longer SUPPRESSES the shrink warning — it only softens its wording
+ * (chunk 7 item 6). The old behaviour let one keyword hide the whole guard, and
+ * the guard exists for the case §2.3 names: a model that quietly drops a
+ * paragraph and still returns `end_turn`. "Tighten the second paragraph" is
+ * exactly the instruction under which that happens, and it is also exactly the
+ * instruction this heuristic matches — so suppressing on a match turned the
+ * guard off in the case it was written for.
+ *
+ * The heuristic is still deliberately generous, but the cost of a false positive
+ * is now a sentence that reads slightly wrong rather than a missing warning.
  */
 export function asksForCutting(prompt) {
   return /\b(cut|cuts|cutting|shorten|shorter|trim|trims|trimming|condense|tighten|tightens|shrink|abbreviate|brief|briefer|concise|compress|delete|remove|drop|reduce|halve|prune|summari[sz]e|tl;?dr)\b/i.test(
@@ -135,11 +144,15 @@ export function validateAiResponse(body, { draft, prompt }) {
   //    dropping a paragraph still returns end_turn.
   const before = canonicalize(draft).length;
   const after = revised.length;
-  if (before > 0 && after < before * SHRINK_WARNING_RATIO && !asksForCutting(prompt)) {
+  if (before > 0 && after < before * SHRINK_WARNING_RATIO) {
     const percent = Math.round((1 - after / before) * 100);
     warnings.push(
-      `the draft is ${percent}% shorter than before this turn, and the instruction ` +
-        'did not ask for cutting',
+      asksForCutting(prompt)
+        ? `the draft is ${percent}% shorter than before this turn. The instruction did ` +
+            'ask for cutting, so this may be exactly right — check that nothing you ' +
+            'meant to keep went with it.'
+        : `the draft is ${percent}% shorter than before this turn, and the instruction ` +
+            'did not ask for cutting',
     );
   }
 
