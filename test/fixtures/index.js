@@ -32,6 +32,15 @@ export const REQUIRED_CONSTRUCTS = [
   }],
   ['inline link', (s) => /\[link to the docs\]\(https:\/\/example\.com\/docs/.test(s)],
   ['bare URL', (s) => /(^|\s)https:\/\/example\.com\/bare\/url(\s|$)/.test(s)],
+
+  // Added in chunk 8, the one authorized §5 fixture change. A link whose text IS its
+  // destination is neither "an inline link" nor "a bare URL", and chunk 7 found the
+  // fixture had none — so `resourceLink: false` (§0.1) was deciding how the commonest
+  // link in the app is spelled with no test holding it. The input form is asserted
+  // here; the canonical form is asserted in canonicalize.test.js, so both halves of
+  // the ratified pin fail loudly if either drifts.
+  ['self-titled link (input form)', (s) =>
+    /\[https:\/\/example\.com\/\]\(https:\/\/example\.com\/\)/.test(s)],
   ['literal asterisk in prose', (s) => /a \\?\* b/.test(s)],
   ['underscored identifier', (s) => /snake\\?_case\\?_name/.test(s)],
   ['percent sign', (s) => /100%/.test(s)],

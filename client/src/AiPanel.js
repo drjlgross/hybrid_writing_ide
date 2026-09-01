@@ -10,7 +10,7 @@ import { useState } from 'react';
 
 import { h } from './h.js';
 
-export function AiPanel({ state, onSubmit, onCheckpoint }) {
+export function AiPanel({ state, onSubmit, onCheckpoint, rawUrl }) {
   const [prompt, setPrompt] = useState('');
   const busy = state.pending !== null;
 
@@ -117,11 +117,25 @@ export function AiPanel({ state, onSubmit, onCheckpoint }) {
       stat('Document', state.slug),
       stat('Turns', String(state.history.length)),
       stat('Uncommitted edits', state.dirty ? 'yes' : 'no'),
+      // The stored document exactly as the server returns it — the same
+      // GET the app itself loads from, no new endpoint and nothing to keep in
+      // sync. Read-only by construction: it is a GET, and it opens in its own
+      // tab so the draft is never navigated away from.
+      rawUrl
+        ? stat(
+            'Stored file',
+            h(
+              'a',
+              { className: 'raw-json', href: rawUrl, target: '_blank', rel: 'noopener noreferrer' },
+              'raw JSON',
+            ),
+          )
+        : null,
     ]),
     h(
       'p',
       { key: 'later', className: 'hint' },
-      'The history view arrives next; turns are being recorded now.',
+      'Every turn, its diff, and Restore are in the history — the toggle is up in the header.',
     ),
   );
 

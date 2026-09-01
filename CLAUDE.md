@@ -83,7 +83,14 @@ this by round-tripping through TipTap — TipTap needs a DOM, and AI responses m
 normalized server-side before they reach the editor.
 
 Pin at minimum: `emphasis: '*'`, `strong: '*'`, `bullet: '-'`, `listItemIndent: 'one'`,
-`rule: '-'`. No GFM extensions (no tables, no strikethrough).
+`rule: '-'`, `resourceLink: false`. No GFM extensions (no tables, no strikethrough).
+
+`resourceLink: false` means a link whose text equals its destination stores as the
+autolink shorthand `<url>` rather than `[url](url)`; ratified chunk 8, after chunk 7's
+report-only investigation found it arriving as a remark default rather than a decision.
+It is the spelling a paste produces, so it is the most common link in the store, and
+§5's fixture now pins it. A BARE url — one that was never a link — is untouched by this
+and stays plain text, because there are no GFM autolink literals.
 
 `rule: '-'` is pinned defensively only. Thematic breaks are NOT part of the dialect
 (§1, §7) — TipTap has no node for one, so a `---` in the store is content that will
@@ -409,7 +416,10 @@ containing only the model's changes.
   asterisk in prose (`a * b`), an underscored identifier (`snake_case_name`), a
   percent sign (`100%`), **two adjacent bullet lists** (the merge rule in §0.1 — truly
   adjacent, nothing between them; a separating paragraph makes the fixture
-  non-conformant), and the typographic artifacts of text pasted from Word and from
+  non-conformant), **a self-titled link** (written `[https://example.com/](https://example.com/)`
+  in the fixture, stored as `<https://example.com/>` — the `resourceLink: false` pin in
+  §0.1; both spellings are asserted, so the dialect choice is held by a test rather than
+  by a library default), and the typographic artifacts of text pasted from Word and from
   Google Docs including pasted hyperlinks.
 
   Escaping is the failure mode that matters. Backslash escapes accumulating across

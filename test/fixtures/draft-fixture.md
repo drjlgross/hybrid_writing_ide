@@ -4,6 +4,8 @@ Dialect drift on purpose: _underscore italic_ and __underscore strong__ should b
 
 A bare URL sits here: https://example.com/bare/url and prose continues after it. A link whose target has parentheses: [parenthesised target](https://example.com/a_(b)) follows it.
 
+A self-titled link is written [https://example.com/](https://example.com/) here, and the store keeps it as the autolink shorthand. This is what link-on-paste produces, so it is the commonest link a writer makes; the bare URL above is a different construct and stays plain text.
+
 Escaping traps: a * b is a literal asterisk, snake_case_name is an underscored identifier, 100% is a percent sign, and 2 * 3 * 4 keeps three of them on one line. 
 
 * Star bullet with **bold** and _italic_

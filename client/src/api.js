@@ -55,5 +55,9 @@ export function createApi({ token, fetchImpl = fetch }) {
     create: (slug) => post('/documents', { slug }),
     checkpoint: (slug, pendingDraft) => post('/checkpoint', { slug, pendingDraft }),
     aiEdit: (slug, prompt, pendingDraft) => post('/ai-edit', { slug, prompt, pendingDraft }),
+    // §4. `pendingDraft` goes along so uncommitted hand edits become their own turn
+    // before the draft is replaced, rather than being thrown away by the restore.
+    restore: (slug, turnId, pendingDraft) =>
+      post('/restore', { slug, turn_id: turnId, pendingDraft }),
   };
 }

@@ -22,7 +22,15 @@ export const STRINGIFY_OPTIONS = {
   rule: '-',
   fences: true,
   incrementListMarker: false,
+
+  // §0.1, ratified chunk 8. A link whose TEXT equals its DESTINATION stores as the
+  // autolink shorthand `<https://example.com/>`, not `[url](url)`. It is remark's
+  // default, but chunk 7 found it deciding a visible dialect question without being
+  // pinned, so it is a decision now: link-on-paste is the commonest gesture in the
+  // app and this is the spelling it produces. A BARE url — never a link — is not
+  // touched by this and stays plain text (no GFM autolink literals).
   resourceLink: false,
+
   tightDefinitions: true,
   bulletOther: '+',
 };

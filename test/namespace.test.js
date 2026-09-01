@@ -300,6 +300,184 @@ test('POST /checkpoint commits a human turn, and reports honestly when there is 
   }
 });
 
+// ── §4 restore, over HTTP (chunk 8 item 3) ─────────────────────────────────────
+
+test('POST /restore appends a turn inside the namespace and never truncates history', async () => {
+  const root = freshRoot();
+  const token = generateToken();
+  const dir = resolveNamespace(token, { root }).dir;
+  createDocument({ slug: 'essay', dir });
+
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+  const base = `${url}/api/t/${token}`;
+
+  try {
+    await post(`${base}/checkpoint`, { slug: 'essay', pendingDraft: 'Version one of the text.\n' });
+    await post(`${base}/checkpoint`, { slug: 'essay', pendingDraft: 'Version two of the text.\n' });
+    await post(`${base}/checkpoint`, { slug: 'essay', pendingDraft: 'Version three of the text.\n' });
+
+    const before = loadDocument('essay', { dir }).history;
+    assert.equal(before.length, 3);
+
+    const { status, body } = await post(`${base}/restore`, { slug: 'essay', turn_id: 1 });
+    assert.equal(status, 200);
+    assert.equal(body.turn.turn_id, 4, 'restore appends a NEW turn');
+    assert.equal(body.turn.author, 'human', '§4: the new turn is a human turn');
+    assert.equal(body.restored_from, 1);
+    assert.equal(body.draft, 'Version one of the text.\n');
+
+    // §0.3: append-only. The turns that were there are byte-identical afterwards.
+    const after = loadDocument('essay', { dir }).history;
+    assert.equal(after.length, 4, 'nothing was truncated');
+    assert.equal(
+      JSON.stringify(after.slice(0, 3)),
+      JSON.stringify(before),
+      'the turns before the restore were not rewritten',
+    );
+    assert.equal(after[3].snapshot, after[0].snapshot, "the new turn holds turn 1's snapshot");
+    assert.equal(after[1].snapshot, 'Version two of the text.\n', 'the turn we backed out of survives');
+  } finally {
+    await close();
+  }
+});
+
+test('§4 restoring to where the draft already is creates no turn, and says so', async () => {
+  const root = freshRoot();
+  const token = generateToken();
+  const dir = resolveNamespace(token, { root }).dir;
+  createDocument({ slug: 'essay', dir });
+
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+  const base = `${url}/api/t/${token}`;
+
+  try {
+    await post(`${base}/checkpoint`, { slug: 'essay', pendingDraft: 'Only version.\n' });
+
+    const { status, body } = await post(`${base}/restore`, { slug: 'essay', turn_id: 1 });
+    assert.equal(status, 200);
+    assert.equal(body.turn, null, 'no empty turn (§3)');
+    assert.equal(body.human_turn, null);
+    assert.equal(body.history.length, 1, 'and nothing was appended');
+    assert.equal(loadDocument('essay', { dir }).history.length, 1);
+  } finally {
+    await close();
+  }
+});
+
+test('§4 restore commits uncommitted hand edits first, instead of throwing them away', async () => {
+  // Not spelled out in §4. The alternative is that clicking Restore silently
+  // destroys whatever was typed and never checkpointed, with no trace in the
+  // ledger — which is precisely the loss §0.2 and §0.3 exist to prevent. Named as
+  // a finding in the chunk-08 report.
+  const root = freshRoot();
+  const token = generateToken();
+  const dir = resolveNamespace(token, { root }).dir;
+  createDocument({ slug: 'essay', dir });
+
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+  const base = `${url}/api/t/${token}`;
+
+  try {
+    await post(`${base}/checkpoint`, { slug: 'essay', pendingDraft: 'The first version.\n' });
+    await post(`${base}/checkpoint`, { slug: 'essay', pendingDraft: 'The second version.\n' });
+
+    const { body } = await post(`${base}/restore`, {
+      slug: 'essay',
+      turn_id: 1,
+      pendingDraft: 'The second version, with a sentence typed just now.\n',
+    });
+
+    assert.equal(body.human_turn.turn_id, 3, 'the pending edits became their own turn');
+    assert.equal(
+      body.human_turn.snapshot,
+      'The second version, with a sentence typed just now.\n',
+      'and that turn holds exactly what was typed',
+    );
+    assert.equal(body.turn.turn_id, 4, 'the restore is the turn after it');
+    assert.equal(body.draft, 'The first version.\n');
+
+    const history = loadDocument('essay', { dir }).history;
+    assert.deepEqual(history.map((turn) => turn.turn_id), [1, 2, 3, 4]);
+    assert.match(history[2].snapshot, /typed just now/, 'the typed text is recoverable from the ledger');
+  } finally {
+    await close();
+  }
+});
+
+test('POST /restore refuses a turn that does not exist, and commits nothing when it does', async () => {
+  const root = freshRoot();
+  const token = generateToken();
+  const dir = resolveNamespace(token, { root }).dir;
+  createDocument({ slug: 'essay', dir });
+
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+  const base = `${url}/api/t/${token}`;
+
+  try {
+    await post(`${base}/checkpoint`, { slug: 'essay', pendingDraft: 'Only version.\n' });
+
+    // A turn id that is not there, WITH pending edits: the bad id must be caught
+    // before anything is committed, or a typo would leave a stray turn as its
+    // only effect.
+    const missing = await post(`${base}/restore`, {
+      slug: 'essay',
+      turn_id: 99,
+      pendingDraft: 'Something typed.\n',
+    });
+    assert.equal(missing.status, 404);
+    assert.match(missing.body.error, /no turn 99/);
+    assert.equal(loadDocument('essay', { dir }).history.length, 1, 'nothing was committed');
+
+    assert.equal((await post(`${base}/restore`, { turn_id: 1 })).status, 400, 'slug is required');
+    assert.equal((await post(`${base}/restore`, { slug: 'essay' })).status, 400, 'turn_id is required');
+    assert.equal(
+      (await post(`${base}/restore`, { slug: 'essay', turn_id: '1' })).status,
+      400,
+      'a turn id is an integer, not a string',
+    );
+    assert.equal(
+      (await post(`${base}/restore`, { slug: 'essay', turn_id: 1, pendingDraft: 42 })).status,
+      400,
+    );
+    assert.equal((await post(`${base}/restore`, { slug: 'nope', turn_id: 1 })).status, 404);
+  } finally {
+    await close();
+  }
+});
+
+test('§0.5 restore is inside the namespace: another token cannot reach this document', async () => {
+  const root = freshRoot();
+  const mine = generateToken();
+  const theirs = generateToken();
+  const mineDir = resolveNamespace(mine, { root }).dir;
+  createDocument({ slug: 'essay', dir: mineDir });
+
+  const app = createServer({ root, callModel: async () => ok('unused\n') });
+  const { url, close } = await serve(app);
+
+  try {
+    await post(`${url}/api/t/${mine}/checkpoint`, { slug: 'essay', pendingDraft: 'Mine.\n' });
+
+    // Same slug, different token: a different namespace, so there is nothing there.
+    const other = await post(`${url}/api/t/${theirs}/restore`, { slug: 'essay', turn_id: 1 });
+    assert.equal(other.status, 404);
+    assert.equal(JSON.stringify(other.body).includes('Mine.'), false);
+
+    // And a malformed token is refused by withNamespace, like every other route.
+    const bad = await post(`${url}/api/t/not-a-token/restore`, { slug: 'essay', turn_id: 1 });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.invalid_token, true);
+
+    assert.equal(loadDocument('essay', { dir: mineDir }).history.length, 1, 'untouched');
+  } finally {
+    await close();
+  }
+});
+
 test('the whole /ai-edit sequence runs inside a namespace', async () => {
   const root = freshRoot();
   const token = generateToken();

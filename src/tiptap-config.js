@@ -32,7 +32,35 @@ export const MARKDOWN_OPTIONS = {
 export const LINK_OPTIONS = {
   autolink: false, // §5: autolink OFF in v1, link-on-paste ON
   linkOnPaste: true,
-  openOnClick: false,
+
+  /**
+   * A single plain click opens the link in a NEW TAB, which is what every other
+   * editor does and what a writer checking their own citation expects. It was off,
+   * so a click did nothing at all and only ⌘/Ctrl-click worked.
+   *
+   * Always a new tab, never a navigation: the extension's default HTMLAttributes
+   * put `target="_blank"` and `rel="noopener noreferrer nofollow"` on every rendered
+   * anchor, and its click handler calls `window.open(href, link.target)`. The draft
+   * is never navigated away from, and nothing is overlaid on it.
+   *
+   * What keeps `window.open` from being handed a script URL is TipTap's own scheme
+   * allowlist, NOT the `protocols` option below: `javascript:`, `data:`, `vbscript:`
+   * and `file:` never become link marks at all — they stay plain prose. Measured, not
+   * assumed; see the test and the chunk-08 addendum. Read `protocols` accordingly —
+   * it only ADDS to TipTap's base list (http, https, ftp, ftps, mailto, tel, callto,
+   * sms, cid, xmpp) and cannot narrow it, so all three entries below are already
+   * admitted and the option is documentation rather than enforcement.
+   *
+   * Editing a link's text still works: click the text beside it and move the caret
+   * in with the keyboard, or select across it. Only the click ON the link is spent
+   * opening it.
+   */
+  openOnClick: true,
+
+  // Off (the extension's default) on purpose: a click that ALSO selected the whole
+  // link would make the one gesture do two things at once.
+  enableClickSelection: false,
+
   protocols: ['http', 'https', 'mailto'],
 };
 

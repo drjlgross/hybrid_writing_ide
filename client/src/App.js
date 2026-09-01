@@ -20,6 +20,7 @@ import { serializeEditorMarkdown } from '../../src/tiptap-serialize.js';
 import { createApi } from './api.js';
 import { createDraftSession, initialSessionState } from './draft-session.js';
 import { AiPanel } from './AiPanel.js';
+import { History } from './History.js';
 import { Library } from './Library.js';
 import { Toolbar } from './Toolbar.js';
 import { h } from './h.js';
@@ -50,6 +51,9 @@ export function App({
   // `state.draft`, because the editor's live content is what the human is
   // looking at and the stored draft lags it by a turn.
   const [empty, setEmpty] = useState(true);
+
+  // §4: "a toggleable timeline". Off by default — the draft is what you came for.
+  const [showHistory, setShowHistory] = useState(false);
 
   // Not null-until-loaded: the editor's mount point must be in the DOM before the
   // effect below can build the editor into it, so the layout renders from the
@@ -170,7 +174,12 @@ export function App({
           ? h(
               'div',
               { key: 'veil', className: 'lock-veil', role: 'status' },
-              'read-only while the model works',
+              // A restore replaces the draft exactly as an AI turn does, so it
+              // locks for the same §0.2 reason — but saying "the model works"
+              // during a restore would be a lie about what is happening.
+              state.pending === 'restore'
+                ? 'read-only while the draft is restored'
+                : 'read-only while the model works',
             )
           : null,
       ]),
@@ -188,6 +197,23 @@ export function App({
         h('em', { key: 'is' }, 'is'),
         ' the key. Share it the way you would share a key.',
       ]),
+      // §4's toggle. In the masthead rather than over the draft: opening the
+      // history must never cover the thing being written about.
+      state.missing
+        ? null
+        : h(
+            'button',
+            {
+              key: 'history-toggle',
+              type: 'button',
+              className: 'tool history-toggle',
+              'aria-expanded': showHistory,
+              onClick: () => setShowHistory((was) => !was),
+            },
+            showHistory
+              ? 'Hide history'
+              : `History (${state.history.length} turn${state.history.length === 1 ? '' : 's'})`,
+          ),
     ]),
     h('main', { key: 'workspace', className: 'workspace' }, [
       // The missing-slug screen appears BESIDE the draft pane, which is merely
@@ -205,8 +231,25 @@ export function App({
               state,
               onSubmit: (prompt) => sessionRef.current.submitPrompt(prompt),
               onCheckpoint: () => sessionRef.current.checkpoint(),
+              // The document's own GET, the one the app loads from (§5). Built
+              // here because this is where the token lives; the panel never
+              // learns what a token is.
+              rawUrl: `/api/t/${token}/documents/${encodeURIComponent(slug)}`,
             }),
       ]),
+
+      // §4: the timeline sits BELOW the draft and the rail, spanning the width. Not
+      // a modal and not an overlay — the draft stays on screen and stays editable
+      // while the history is open, which is what makes "copy a sentence out of turn
+      // 3 into the live draft" a thing a person can actually do.
+      showHistory && !state.missing
+        ? h(History, {
+            key: 'history',
+            history: state.history,
+            busy: state.pending !== null || state.locked,
+            onRestore: (turnId) => sessionRef.current.restoreTo(turnId),
+          })
+        : null,
     ]),
   ]);
 }

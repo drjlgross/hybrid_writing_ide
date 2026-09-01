@@ -219,7 +219,34 @@ test('canonicalize preserves the content §5 cares about', () => {
   assert.match(out, /\[Microsoft Word\]\(https:\/\/www\.microsoft\.com\/en-us\/microsoft-365\/word\)/);
   assert.match(out, /\[Google Docs\]\(https:\/\/docs\.google\.com\/document\/d\/1AbC_dEf-23\/edit\)/);
   assert.match(out, /https:\/\/example\.com\/bare\/url/, 'bare URL survives');
-  assert.doesNotMatch(out, /<https:\/\//, 'bare URL is NOT autolinked (no GFM literals)');
+  assert.doesNotMatch(
+    out,
+    /<https:\/\/example\.com\/bare\/url>/,
+    'a BARE url is NOT autolinked — no GFM literals (§0.1)',
+  );
+
+  // §0.1 `resourceLink: false`, ratified chunk 8. A link whose text equals its
+  // destination stores as `<url>`. This is the OTHER half of the pin in
+  // test/fixtures/index.js, which holds the input spelling; together they mean the
+  // dialect choice fails a test if it drifts, instead of following a library default.
+  assert.match(
+    out,
+    /<https:\/\/example\.com\/>/,
+    'a self-titled link must store as the autolink shorthand (resourceLink: false)',
+  );
+  assert.doesNotMatch(
+    out,
+    /\[https:\/\/example\.com\/\]\(https:\/\/example\.com\/\)/,
+    'the resource form must not survive canonicalization',
+  );
+
+  // And the two constructs stay distinguishable: exactly one `<…>` in the canonical
+  // fixture, and it is the self-titled link — not the bare URL leaking into one.
+  assert.deepEqual(
+    out.match(/<[a-z]+:[^>]*>/g),
+    ['<https://example.com/>'],
+    'exactly one autolink shorthand in canonical output, and it is the self-titled link',
+  );
 
   assert.match(out, /a \\\* b/, 'literal asterisk survives (escaped)');
   assert.match(out, /snake\\?_case\\?_name/, 'snake_case_name survives');
@@ -248,7 +275,10 @@ test('canonicalize preserves the content §5 cares about', () => {
       .replace(/&nbsp;/g, '\u00a0')
       .replace(/\\/g, '')
       .replace(/^\s*[-*+] /gm, ' ') // list markers are markup, not prose
-      .replace(/[*_`[\]()]|https?:\/\/\S+/g, ' ')
+      // `<>` joined this class in chunk 8: with `resourceLink: false` an autolink's
+      // angle brackets are link markup exactly as `[]()` are, and the fixture has no
+      // angle bracket that is prose.
+      .replace(/[*_`[\]()<>]|https?:\/\/\S+/g, ' ')
       .split(/\s+/)
       .filter(Boolean);
   assert.deepEqual(words(out), words(FIXTURE), 'prose words changed');

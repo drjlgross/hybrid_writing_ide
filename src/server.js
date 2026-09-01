@@ -29,7 +29,7 @@ import {
   loadDocument,
   saveDocument,
 } from './storage.js';
-import { checkpoint } from './turns.js';
+import { checkpoint, commitHumanTurn, getTurn, restoreToTurn } from './turns.js';
 
 const CLIENT_DIST = fileURLToPath(new URL('../client/dist/', import.meta.url));
 
@@ -163,6 +163,89 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
 
       const saved = saveDocument(next, { dir });
       res.json({ draft: saved.draft, turn, history: saved.history });
+    } catch (error) {
+      if (error instanceof LedgerInvariantError) {
+        res.status(500).json({ error: error.message, ledger_invariant_violated: true });
+        return;
+      }
+      res.status(error.code === 'ENOENT' ? 404 : 500).json({ error: error.message });
+    }
+  });
+
+  // ── restore ───────────────────────────────────────────────────────────────────
+  /**
+   * POST /restore {slug, turn_id, pendingDraft?} — §4's "Restore to this turn".
+   *
+   * Appends a NEW human turn holding the chosen turn's snapshot. Nothing is
+   * truncated and nothing is rewritten (§0.3); the turns after the restored one stay
+   * exactly where they are, which is what makes a bad AI turn recoverable rather
+   * than destructive. `restoreToTurn` does the work; this handler only addresses the
+   * document and reports honestly.
+   *
+   * `pendingDraft` is committed FIRST, as its own human turn, using the same
+   * mechanism as §2.4 step 2. §4 does not say what becomes of hand edits that were
+   * never checkpointed, and the answer has to be something: replacing the draft
+   * without committing them destroys real work and leaves no trace of it in the
+   * ledger, which is the failure §0.3 and §0.2 both exist to prevent. Named as a
+   * finding in the chunk-08 report.
+   *
+   * Two `null` turns is the §4 case "restoring to a turn the draft already matches":
+   * nothing is written and the response says so, so the UI cannot report a restore
+   * that did not happen.
+   */
+  api.post('/restore', (req, res) => {
+    const { slug, turn_id: turnId, pendingDraft } = req.body ?? {};
+
+    if (typeof slug !== 'string' || slug === '') {
+      res.status(400).json({ error: 'slug is required' });
+      return;
+    }
+    if (!Number.isInteger(turnId)) {
+      res.status(400).json({ error: 'turn_id must be an integer turn id' });
+      return;
+    }
+    if (pendingDraft !== undefined && typeof pendingDraft !== 'string') {
+      res.status(400).json({ error: 'pendingDraft must be a string when present' });
+      return;
+    }
+
+    const dir = req.namespace.dir;
+    try {
+      const doc = loadDocument(slug, { dir });
+
+      // Checked before anything is committed: a typo in a turn id must not leave a
+      // human turn behind as its only effect.
+      if (!getTurn(doc, turnId)) {
+        res.status(404).json({
+          error: `no turn ${turnId} in ${JSON.stringify(slug)}. This document holds turns ` +
+            `${doc.history.map((turn) => turn.turn_id).join(', ') || '(none)'}.`,
+        });
+        return;
+      }
+
+      const { doc: afterHuman, turn: humanTurn } = commitHumanTurn(doc, pendingDraft ?? doc.draft);
+      const { doc: afterRestore, turn: restoreTurn } = restoreToTurn(afterHuman, turnId);
+
+      // Nothing changed and nothing was pending: no write, no turn, and say so.
+      if (!humanTurn && !restoreTurn) {
+        res.json({
+          draft: doc.draft,
+          human_turn: null,
+          turn: null,
+          restored_from: turnId,
+          history: doc.history,
+        });
+        return;
+      }
+
+      const saved = saveDocument(afterRestore, { dir });
+      res.json({
+        draft: saved.draft,
+        human_turn: humanTurn,
+        turn: restoreTurn,
+        restored_from: turnId,
+        history: saved.history,
+      });
     } catch (error) {
       if (error instanceof LedgerInvariantError) {
         res.status(500).json({ error: error.message, ledger_invariant_violated: true });

@@ -349,3 +349,136 @@ test('an empty prompt is refused without locking anything', async () => {
   assert.equal(editor.editable, true, 'a rejected prompt must not lock the editor');
   assert.match(session.getState().error, /instruction/);
 });
+
+// ── §4: restore, from the client's side ─────────────────────────────────────────
+
+const restoreResult = (overrides = {}) => ({
+  draft: 'Turn one text.\n',
+  human_turn: null,
+  turn: { turn_id: 4, author: 'human' },
+  restored_from: 1,
+  history: [{ turn_id: 1 }, { turn_id: 2 }, { turn_id: 3 }, { turn_id: 4 }],
+  ...overrides,
+});
+
+test('§4 a restore replaces the editor content and names both turn numbers', async () => {
+  const { editor, session } = build({
+    initial: 'Turn three text.\n',
+    api: { restore: async () => restoreResult() },
+  });
+
+  const result = await session.restoreTo(1);
+
+  assert.equal(result.turn.turn_id, 4);
+  assert.equal(editor.markdown, 'Turn one text.\n', 'the editor shows the restored content');
+  assert.equal(editor.setContentCount, 1);
+
+  const state = session.getState();
+  assert.equal(state.draft, 'Turn one text.\n');
+  assert.equal(state.history.length, 4, 'the turn count moved');
+  assert.match(state.notice, /restored turn 1 as turn 4/);
+  assert.equal(state.error, null);
+});
+
+test('§4 restoring to where you already are does not report a restore that did not happen', async () => {
+  const { editor, session } = build({
+    initial: 'Unchanged.\n',
+    api: {
+      restore: async () =>
+        restoreResult({ turn: null, human_turn: null, draft: 'Unchanged.\n', history: [{ turn_id: 1 }] }),
+    },
+  });
+
+  await session.restoreTo(1);
+
+  assert.equal(editor.setContentCount, 0, 'nothing changed, so the caret is left alone');
+  const state = session.getState();
+  assert.match(state.notice, /nothing to restore/);
+  assert.doesNotMatch(state.notice, /restored turn 1 as turn/);
+  assert.equal(state.history.length, 1, 'and no turn was minted');
+});
+
+test('§4 a restore commits pending hand edits first, and says both things happened', async () => {
+  const sent = [];
+  const { session } = build({
+    initial: 'Typed but never checkpointed.\n',
+    api: {
+      restore: async (slug, turnId, pendingDraft) => {
+        sent.push({ slug, turnId, pendingDraft });
+        return restoreResult({ human_turn: { turn_id: 3, author: 'human' }, turn: { turn_id: 4 } });
+      },
+    },
+  });
+
+  await session.restoreTo(1);
+
+  assert.deepEqual(sent, [
+    { slug: 'draft', turnId: 1, pendingDraft: 'Typed but never checkpointed.\n' },
+  ], 'the editor text goes with the request, or the server cannot save it');
+
+  const notice = session.getState().notice;
+  assert.match(notice, /hand edits committed as turn 3/);
+  assert.match(notice, /restored turn 1 as turn 4/);
+});
+
+test('§0.2 the editor is read-only while a restore is in flight, and unlocks after', async () => {
+  // A restore replaces the draft exactly as an AI turn does, so anything typed
+  // while it is in flight would be destroyed with no record of it having existed.
+  const gate = deferred();
+  const { editor, session } = build({
+    initial: 'Before.\n',
+    api: { restore: () => gate.promise },
+  });
+
+  const running = session.restoreTo(1);
+  assert.equal(editor.editable, false, 'locked synchronously, before the first await');
+  assert.equal(session.getState().locked, true);
+  assert.equal(session.getState().pending, 'restore');
+
+  gate.resolve(restoreResult());
+  await running;
+
+  assert.equal(editor.editable, true);
+  assert.equal(session.getState().locked, false);
+  assert.equal(session.getState().pending, null);
+});
+
+test('§0.2 a failed restore unlocks the editor and leaves the draft exactly as it was', async () => {
+  const { editor, session } = build({
+    initial: 'The text that must survive.\n',
+    api: {
+      restore: async () => {
+        throw new Error('the restore blew up');
+      },
+    },
+  });
+
+  assert.equal(await session.restoreTo(1), null);
+
+  assert.equal(editor.editable, true, 'the editor unlocks');
+  assert.equal(editor.setContentCount, 0, 'and its content was never touched');
+  assert.equal(editor.markdown, 'The text that must survive.\n');
+  assert.match(session.getState().error, /the restore blew up/);
+});
+
+test('a restore cannot start while an AI turn is in flight', async () => {
+  const gate = deferred();
+  let restores = 0;
+  const { session } = build({
+    api: {
+      aiEdit: () => gate.promise,
+      restore: async () => {
+        restores += 1;
+        return restoreResult();
+      },
+    },
+  });
+
+  const running = session.submitPrompt('rewrite it');
+  assert.equal(await session.restoreTo(1), null, 'refused, not raced');
+  assert.equal(restores, 0, 'and the server was never asked');
+  assert.match(session.getState().notice, /already in flight/);
+
+  gate.resolve(aiResult('x\n'));
+  await running;
+});

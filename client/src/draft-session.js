@@ -17,7 +17,7 @@
  * Keystrokes only bump a counter.
  */
 
-/** @typedef {'checkpoint'|'ai'|'create'|null} Pending */
+/** @typedef {'checkpoint'|'ai'|'create'|'restore'|null} Pending */
 
 /**
  * The shape of the session state before anything has happened.
@@ -127,6 +127,18 @@ export function createDraftSession({ api, editor, slug, onState }) {
   }
 
   /**
+   * The listing carries a turn count per document, and that count goes stale the
+   * moment a turn commits — the panel said 13 turns while the sidebar still said 4,
+   * because the listing was only ever fetched at load. So: refresh at every turn
+   * boundary, and only at a turn boundary. A commit that created nothing changed no
+   * count, and re-fetching then would be a request that can only tell you what you
+   * already know.
+   */
+  function refreshLibraryIfCommitted(committed) {
+    return committed ? refreshLibrary() : Promise.resolve();
+  }
+
+  /**
    * Create a document in this namespace (§0.5). The server sanitizes the slug and
    * refuses collisions, so the slug that comes back may not be the one typed —
    * hence everything downstream reads `doc.slug`, never the argument.
@@ -194,6 +206,7 @@ export function createDraftSession({ api, editor, slug, onState }) {
           : 'nothing to checkpoint — the draft is unchanged since the last turn',
         dirty: generation !== at,
       });
+      await refreshLibraryIfCommitted(Boolean(result.turn));
       return result;
     } catch (error) {
       set({ pending: null, error: describe(error) });
@@ -242,6 +255,8 @@ export function createDraftSession({ api, editor, slug, onState }) {
         stripped: result.ai_turn?.stripped ?? null,
         notice: notifyOf(result),
       });
+      // An AI turn always commits (§3), so the count always moved.
+      await refreshLibrary();
       return result;
     } catch (error) {
       // §2.4: any failure between steps 4 and 6 leaves the draft where step 2 left
@@ -256,9 +271,64 @@ export function createDraftSession({ api, editor, slug, onState }) {
       try {
         const doc = await api.load(state.slug);
         set({ history: doc.history, draft: doc.draft });
+        // §2.4 step 2's human turn may well have committed before the failure, so
+        // this is a turn boundary even though the AI turn never happened.
+        await refreshLibrary();
       } catch {
         /* keep the original error */
       }
+      return null;
+    }
+  }
+
+  /**
+   * §4: restore the working draft to a turn's snapshot.
+   *
+   * Locked like an AI turn, and for the same §0.2 reason: the response replaces the
+   * editor's content, so anything typed while it is in flight would be destroyed
+   * silently and would never appear in the history. The lock is short — this is a
+   * disk read and a write, not a model call — but the hazard is identical.
+   *
+   * The pending draft goes with the request so hand edits that were never
+   * checkpointed become their own turn before the restore lands, instead of being
+   * the one thing the restore quietly throws away.
+   *
+   * The editor's content is replaced ONLY when a restore turn was actually created.
+   * When nothing changed, re-setting it would throw the caret to the top of the
+   * document as the reward for clicking a button that did nothing.
+   */
+  async function restoreTo(turnId) {
+    if (state.pending) return refuse();
+
+    const at = generation;
+    const markdown = editor.getMarkdown(); // commit boundary — §0.6
+
+    applyLock(true);
+    set({ pending: 'restore', locked: true, error: null, notice: null });
+
+    try {
+      const result = await api.restore(state.slug, turnId, markdown);
+      const committed = Boolean(result.human_turn || result.turn);
+
+      if (result.turn) editor.setMarkdown(result.draft);
+      applyLock(false);
+
+      set({
+        pending: null,
+        locked: false,
+        draft: result.draft,
+        history: result.history,
+        notice: describeRestore(result, turnId),
+        // Nothing committed means nothing was cleaned up, so the dirty flag is not
+        // this function's to clear.
+        ...(committed ? { dirty: generation !== at } : {}),
+      });
+      await refreshLibraryIfCommitted(committed);
+      return result;
+    } catch (error) {
+      // Nothing was replaced: the editor still holds exactly what it held.
+      applyLock(false);
+      set({ pending: null, locked: false, error: describe(error) });
       return null;
     }
   }
@@ -278,10 +348,32 @@ export function createDraftSession({ api, editor, slug, onState }) {
     noteEdit,
     checkpoint: checkpointNow,
     submitPrompt,
+    restoreTo,
     createDocument: createDocumentHere,
     refreshLibrary,
     getState: () => state,
   };
+}
+
+/**
+ * What actually happened on a restore (§4: the UI must not report one that did not).
+ *
+ * Four outcomes, because the pending-edit commit and the restore itself each may or
+ * may not have produced a turn.
+ */
+function describeRestore(result, turnId) {
+  const parts = [];
+  if (result.human_turn) parts.push(`your hand edits committed as turn ${result.human_turn.turn_id}`);
+
+  if (result.turn) {
+    parts.push(`restored turn ${turnId} as turn ${result.turn.turn_id}`);
+  } else if (result.human_turn) {
+    parts.push(`the draft already matched turn ${turnId}, so nothing was restored`);
+  } else {
+    parts.push(`the draft is already turn ${turnId} — nothing to restore`);
+  }
+
+  return parts.join('; ');
 }
 
 /** What to say after a turn that committed but carried warnings (§2.3). */
