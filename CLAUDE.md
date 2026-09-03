@@ -51,7 +51,10 @@ line on why the test could not be written without it. Anything imported from
 `src/` still needs my approval first.
 
 Approved so far: jsdom (chunk 1, needed because tiptap-markdown's serializer
-requires an Editor instance and an Editor builds a ProseMirror view).
+requires an Editor instance and an Editor builds a ProseMirror view); playwright
+(2026-09-03, needed because jsdom has no layout engine, so every geometric claim
+about the §12 surface is otherwise measured against a stub — scope is fixed by
+the Headless browser subsection of the Sandbox rules below).
 
 ## 🔒 Sandbox
 
@@ -66,6 +69,50 @@ the npm cache outside this tree. That is the only permitted exception.
 
 If a step seems to require touching anything outside the project root, stop and
 say so rather than doing it.
+
+### Headless browser (test-only)
+
+Playwright is an approved test-only devDependency. It exists for one thing:
+seeing the app as it actually renders. jsdom has no layout at all, so every
+geometric fact the §12 surface depends on is otherwise unverified — the chunk-08
+bug, where history spanned `1 / -1` and slid under the sticky rail covering every
+Restore control, is exactly the class jsdom cannot see and a browser assertion
+pins permanently.
+
+**This is a standing capability, not a per-request permission.** Use it whenever
+rendered reality would inform the work: verifying a layout claim before reporting
+it, checking that a UI change looks right, reproducing a visual bug. Do not ask
+first — the scope bullets below are the entire constraint.
+
+Ad-hoc verification is throwaway and lives in scratch or `.tmp-test/`. Committed
+artifacts — test files, the `test:browser` script — arrive only in chunks that
+name them, per the one-chunk-at-a-time rule above.
+
+Scope, and nothing beyond it:
+
+- Browsers install **inside the project**, at
+  `node_modules/playwright-core/.local-browsers`. `PLAYWRIGHT_BROWSERS_PATH=0` is
+  what puts them there and must stay set wherever they are installed or launched.
+  No machine-wide cache is read or written. Deleting `node_modules` deletes the
+  browsers.
+- The one-time download from `cdn.playwright.dev` is the only outbound network
+  this grants.
+- Whenever it runs, the browser talks to `127.0.0.1` and nothing else, on an
+  ephemeral port served by this repo's own server. Navigating to a public URL is
+  out of scope; if it ever seems necessary, stop and say so.
+- Scratch — browser profile, screenshots, ad-hoc verification scripts — goes to
+  `.tmp-test/` or the session scratchpad, both disposable and both gitignored.
+  Nothing is written outside the project root.
+- Every **committed** import of `playwright` stays under `test/`. Throwaway
+  scripts are fine anywhere disposable; what this bans is a deploy dependency.
+- The browser never sees `ANTHROPIC_API_KEY` or a real capability token. It runs
+  against a scratch document root with a dummy key, never the real `documents/`.
+- Browser tests run from their own `npm run test:browser`, not from `npm test`.
+  `npm test` stays hermetic: a fresh clone with no browser binary must still pass
+  it. The script arrives with the chunk that writes the first layout assertion.
+
+This is a development capability and must not become a deploy dependency: nothing
+in `src/` or `scripts/` may import it.
 
 ---
 
