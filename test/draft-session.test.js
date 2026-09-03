@@ -217,6 +217,140 @@ test('§2.3 warnings on the committed turn reach the UI state', async () => {
   assert.deepEqual(session.getState().stripped, { heading: 2, blockquote: 1 });
 });
 
+// ── §0.7 / §0.9: the model's speech reaches the panel ──────────────────────────
+
+test('§0.7 the note from the committed turn reaches the state', async () => {
+  const { session } = build({
+    initial: 'Before.\n',
+    api: {
+      aiEdit: async () =>
+        aiResult('After.\n', {
+          ai_turn: {
+            turn_id: 2,
+            author: 'ai',
+            prompt: 'p',
+            note: 'I read this as a copy edit. Say so if you meant a reframe.',
+          },
+        }),
+    },
+  });
+
+  assert.equal(session.getState().note, null, 'null before any turn has spoken');
+
+  await session.submitPrompt('do it');
+  assert.equal(session.getState().note, 'I read this as a copy edit. Say so if you meant a reframe.');
+  assert.equal(session.getState().speechOnly, false, 'this turn changed the draft');
+});
+
+test('§12 a new prompt overwrites the response before the next one lands', async () => {
+  // §12: "A new prompt overwrites it." The clearing has to happen at SUBMIT, not at
+  // commit — the previous turn's speech sitting under the pending indicator reads as
+  // an answer to the question being asked.
+  //
+  // ONE session, two prompts. Two sessions would prove nothing: a fresh one starts
+  // with `note: null` whether or not submitting clears anything.
+  const gate = deferred();
+  let turn = 0;
+  const { session } = build({
+    initial: 'Before.\n',
+    api: {
+      aiEdit: async () => {
+        turn += 1;
+        if (turn === 2) await gate.promise;
+        return aiResult('After.\n', {
+          ai_turn: {
+            turn_id: turn + 1,
+            author: 'ai',
+            prompt: 'p',
+            note: turn === 1 ? 'The first answer.' : 'The second answer.',
+            warnings: turn === 1 ? ['stripped: 1 heading'] : undefined,
+          },
+        });
+      },
+    },
+  });
+
+  await session.submitPrompt('one');
+  assert.equal(session.getState().note, 'The first answer.');
+  assert.equal(session.getState().warnings.length, 1);
+
+  const inFlight = session.submitPrompt('two');
+  await Promise.resolve();
+
+  const midFlight = session.getState();
+  assert.equal(midFlight.pending, 'ai', 'the second turn really is in flight');
+  assert.equal(midFlight.note, null, 'the first answer is gone the moment the second prompt goes out');
+  assert.equal(midFlight.speechOnly, false);
+  assert.deepEqual(midFlight.warnings, [], "and so is the first turn's reporting");
+
+  gate.resolve();
+  await inFlight;
+  assert.equal(session.getState().note, 'The second answer.');
+});
+
+test('§0.9 a speech-only turn is reported as one, and leaves the editor alone', async () => {
+  // The visible symptom of a speech-only turn is a draft that did not move, which
+  // is indistinguishable from a turn that silently failed unless something says
+  // which it was. And re-setting identical content would throw the caret to the
+  // top of the document as the reward for asking a question.
+  const { editor, session } = build({
+    initial: 'The biology is the reason.\n',
+    api: {
+      load: async () => ({ draft: 'The biology is the reason.\n', history: [] }),
+      aiEdit: async () => ({
+        draft: 'The biology is the reason.\n',
+        human_turn: null,
+        ai_turn: {
+          turn_id: 2,
+          author: 'ai',
+          prompt: 'weigh in on the change I just made',
+          note: 'You moved the claim to the front. That is the right order.',
+        },
+        history: [{ turn_id: 1 }, { turn_id: 2 }],
+      }),
+    },
+  });
+
+  await session.load();
+  const setContentsAfterLoad = editor.setContentCount;
+
+  await session.submitPrompt('weigh in on the change I just made');
+  const state = session.getState();
+
+  assert.match(state.note, /right order/, 'the speech is what the turn produced');
+  assert.equal(state.speechOnly, true);
+  assert.match(state.notice, /no change to the draft/, 'and the app says so, as system reporting');
+  assert.match(state.notice, /AI turn 2 committed/, 'while still confirming the turn committed');
+  assert.equal(
+    editor.setContentCount,
+    setContentsAfterLoad,
+    'the editor content was not replaced with identical text',
+  );
+  assert.equal(editor.editable, true, '§0.2: and the lock was released');
+});
+
+test('a turn that DID change the draft says so, and replaces the content', async () => {
+  const { editor, session } = build({
+    initial: 'Before.\n',
+    api: {
+      load: async () => ({ draft: 'Before.\n', history: [] }),
+      aiEdit: async () =>
+        aiResult('After.\n', {
+          ai_turn: { turn_id: 2, author: 'ai', prompt: 'p', note: 'Rewritten.' },
+        }),
+    },
+  });
+
+  await session.load();
+  const setContentsAfterLoad = editor.setContentCount;
+
+  await session.submitPrompt('do it');
+  assert.equal(session.getState().speechOnly, false);
+  assert.doesNotMatch(session.getState().notice, /no change to the draft/);
+  assert.equal(editor.setContentCount, setContentsAfterLoad + 1, 'the model\'s text is on screen');
+  assert.equal(editor.markdown, 'After.\n');
+});
+
 // ── §0.6: serialize at commit boundaries only ───────────────────────────────────
 
 test('§0.6 typing never serializes; only a commit boundary does', async () => {

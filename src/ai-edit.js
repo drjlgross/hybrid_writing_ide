@@ -23,19 +23,29 @@ import { getTurn, submitAiPrompt } from './turns.js';
 /**
  * The diff of the most recent human turn (§2.1 item 2), or null.
  *
+ * §2.1 says: "The word-level diff of the most recent human turn, IF THE MOST
+ * RECENT TURN IS A HUMAN TURN." So the turn to diff is not only the one step 2
+ * just minted — it is the last turn in the ledger whenever that turn is a human
+ * one. The two differ in exactly the workflow §3 requires be verified: hand-edit,
+ * Checkpoint, then prompt. The Checkpoint commits the edits, so step 2 creates
+ * nothing, and reading only step 2's turn sent no diff at all for the change the
+ * human had just made and was asking about. Fixed in chunk 11 and named there.
+ *
  * Compared against the turn BEFORE it: that is what the human changed. On the
  * first turn of a document there is no previous snapshot, so the whole draft is
  * the human's — and sending "everything is new" as a diff tells the model
  * nothing it cannot see in the draft itself.
  */
 export function humanEditDiff(doc, humanTurn) {
-  if (!humanTurn) return null;
+  const last = doc.history[doc.history.length - 1];
+  const turn = humanTurn ?? (last?.author === 'human' ? last : null);
+  if (!turn) return null;
 
-  const index = doc.history.findIndex((turn) => turn.turn_id === humanTurn.turn_id);
+  const index = doc.history.findIndex((entry) => entry.turn_id === turn.turn_id);
   if (index <= 0) return null;
 
   const previous = doc.history[index - 1];
-  return formatDiffForPrompt(previous.snapshot, humanTurn.snapshot);
+  return formatDiffForPrompt(previous.snapshot, turn.snapshot);
 }
 
 /**

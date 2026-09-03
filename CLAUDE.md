@@ -661,6 +661,28 @@ and §0.9 together.
 - **Export transcript**: the full ledger as JSON, from a button in the top row (§12).
   This replaces the raw-JSON link.
 
+  The wrapper is pinned here rather than left to the implementation, resolving F49
+  (chunk 10 invented a shape because §4 gave none):
+
+      {
+        "schema_version": 1,
+        "slug": "...",
+        "exported_at": "ISO 8601",
+        "turns": [ ... the ledger verbatim, per §3 ... ]
+      }
+
+  `schema_version` is the SAME constant §0.5 requires on every stored document, not
+  a second one — an exported file outlives the app version that wrote it by more,
+  not less, than the stored one does, so it wants the same protection. Its presence
+  is asserted on the exported FILE, not only in the code that writes it: the only
+  thing a later reader ever sees is those bytes. `slug` because a file named
+  `draft-transcript.json` in a folder of them is not self-identifying once it is
+  out of the app; `exported_at` because §11's K4 turns on reconstructing when
+  something was looked at. `turns` is the ledger verbatim — full snapshots per §0.4,
+  no diffs, since diffs are computed from snapshots and never stored (§5). The
+  model's speech goes with it, because the note is a field on the turn (§0.7),
+  which is what §9's S13 means by the conversation having the ledger's durability.
+
 ## 5. Tech constraints
 - React frontend. Editor: TipTap with `tiptap-markdown` plus `@tiptap/extension-link`.
   Configure TipTap to allow ONLY bold, italic, bullet-list, and link marks/nodes —
@@ -893,7 +915,16 @@ without losing anything load-bearing.
 
 **Left:** the editor.
 
-**Right column**, three boxes, same paper treatment, top to bottom:
+**Right column**, three boxes, same paper treatment, top to bottom.
+
+**Every box renders a white content surface at all times**, whether or not it has
+content — the Prompt's textarea, and the same surface in the other two. Matching
+anatomy: same white, same border, same radius, same padding, declared once so the
+three cannot drift apart. Empty-state text renders **inside** the surface, in the
+muted colour, the way a textarea's placeholder sits inside the textarea; it never
+stands in place of the surface. The rail therefore reads as three parallel boxes at
+first paint, before anything has happened. Added 2026-09-03, replacing the narrower
+rule that only the Model Response note wore a surface.
 
 1. **Prompt** — textarea; attached-file chips persisting across submits, each carrying
    its editable description; **`+` bottom-left** for add-a-file, **Submit** bottom-right
@@ -903,8 +934,21 @@ without losing anything load-bearing.
 2. **Model Response** — empty by default, populates as the model responds. **A new
    prompt overwrites it.** Prior responses live in the ledger and are reached through
    history.
+
+   The note renders on the box's content surface, per the rule above. It holds
+   SPEECH and only speech (§0.7): the §2.3 validation warnings are the system
+   reporting on a turn, not the model talking, and they stay in the Prompt box
+   beside the control that caused them. Blending the two would be exactly the
+   failure §9's S12 forbids.
 3. **Standing Rules** — bullet list, blank by default, human-editable in place, model
    proposals appearing here per S11.
+
+**§0.5's capability disclosure stays on the surface**, in the header, visible without
+a click — not inside the switcher drawer, and not inside any other drawer or menu.
+Resolves F51, 2026-09-03. §0.5 requires that a namespace "be described that way to
+anyone given a link", and a disclosure someone has to go looking for cannot do the one
+job it has: stopping a person from treating a capability URL as private. Step 14 is
+deploy, and real people will be holding real links.
 
 **Removed:** the Documents panel (creation and switching move to the top row) and
 everything below the horizontal separator — document name, turn count, uncommitted-edits
@@ -958,6 +1002,20 @@ Added 2026-09-02. Renumber upward if any collide with an F-number already used i
   row. Checkpoint-then-send is a common sequence and the two controls are now far
   apart. Watch in use rather than pre-solving.
 
+Raised by chunk 10, resolved 2026-09-03 in chunk 11 and recorded here so the numbers
+are not reused:
+
+- **F49 — the Export transcript wrapper.** RESOLVED: the shape is written into §4.
+- **F51 — §0.5's disclosure behind a click.** RESOLVED: it is back on the surface,
+  written into §12.
+- **F52 — where §2.3 warnings live.** RESOLVED AS-IS: they stay in the Prompt box.
+  A validation warning is the system reporting, not the model talking, and Model
+  Response holds speech only (§12).
+
+Still open from chunk 10: **F48** (the `+` is in the layout but attaches nothing until
+step 12), **F50** (the history toggle lost its turn count), **F53** (which top-row
+controls are disabled mid-turn).
+
 ---
 
 ## Build order
@@ -971,9 +1029,9 @@ not by number, so the reference survives every extension.
 Entries are pointers. Anything a chunk needs to know lives in the section it names;
 what belongs here is *where in the sequence* and *why there*.
 
-Steps 1–8 are built, tested, and committed: canonicalize, round-trip, storage, turn
-model and Checkpoint, AI endpoint, editor and panel, clipboard fixture, history view.
-The detail is in git and in `reports/`.
+Steps 1–10 are built, tested, and committed: canonicalize, round-trip, storage, turn
+model and Checkpoint, AI endpoint, editor and panel, clipboard fixture, history view,
+the spec extension, and the §12 UI cleanup. The detail is in git and in `reports/`.
 
 9. **Spec extension.** This file. No code.
 

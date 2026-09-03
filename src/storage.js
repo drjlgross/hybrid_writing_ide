@@ -30,8 +30,12 @@ import { dirname, join } from 'node:path';
 
 import { canonicalize } from './canonicalize.js';
 import { defaultNamespace } from './namespace.js';
+import { SCHEMA_VERSION } from './schema.js';
 
-export const SCHEMA_VERSION = 1;
+// Re-exported so every existing importer keeps working. It is DECLARED in
+// schema.js because the client's transcript export needs it too and cannot import
+// this file — see the note there.
+export { SCHEMA_VERSION };
 
 /**
  * The local-development namespace (§0.5's fixed default token), NOT bare

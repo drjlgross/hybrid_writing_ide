@@ -10,9 +10,16 @@
  * no overlay, no full-screen graphic.
  *
  * The turn's outcome — error, notice, §2.3 warnings — is reported here too,
- * beneath the controls that caused it. It is NOT in the Model Response box: that
- * box is the model's speech (§0.7), which does not exist until step 11, and
- * putting a validation warning in it now would make an empty box look populated.
+ * beneath the controls that caused it. It is NOT in the Model Response box, and
+ * now that the model's speech is real (§0.7, step 11) that separation is doing
+ * work rather than waiting for it: a validation warning is THE SYSTEM REPORTING,
+ * not the model talking, and Model Response holds speech only. Putting "stripped:
+ * 2 headings" beside the model's own words would blend the two records §9's S12
+ * says the UI never blends. Recorded as F52 in chunk 10 and kept in chunk 11.
+ *
+ * That includes the speech-only notice. "AI turn 4 committed — no change to the
+ * draft" is a fact the app observed about the turn, so it belongs here; the
+ * model's account of WHY it changed nothing is speech, and belongs there.
  *
  * WHAT IS DELIBERATELY NOT HERE: the `+` attaches nothing yet. Context files are
  * §8 and arrive in step 12. The control occupies its §12 position, disabled and

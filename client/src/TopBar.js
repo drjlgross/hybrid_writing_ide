@@ -168,14 +168,16 @@ export function TopBar({
               )
             : h('p', { key: 'none', className: 'hint' }, 'No documents here yet.'),
 
-          // §0.5: a capability token is not access control, and anyone handed a
-          // link has to be told what the link actually gives them. It belongs
-          // here, beside the list of everything the link reaches.
-          h('p', { key: 'capability', className: 'hint capability' }, [
-            'Anyone with this link can read and edit every document listed here. There is no login — the link ',
-            h('em', { key: 'is' }, 'is'),
-            ' the key. Share it the way you would share a key.',
-          ]),
+          // §0.5's disclosure is NOT here. Chunk 10 put it in this drawer; F51
+          // recorded that as the one §12 change making a §0.5 obligation less
+          // prominent, and chunk 11 resolved it by moving the sentence to the
+          // masthead, where it is visible without a click. One copy, on the
+          // surface — see App.js. This comment is the pointer, not a duplicate.
+          h(
+            'p',
+            { key: 'reach', className: 'hint' },
+            'Every document this link reaches is listed above.',
+          ),
         ])
       : null;
 

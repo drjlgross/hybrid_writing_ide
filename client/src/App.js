@@ -218,6 +218,17 @@ export function App({
     h('header', { key: 'masthead', className: 'masthead' }, [
       h('h1', { key: 'title' }, 'One draft, two hands'),
       topBar,
+
+      // §0.5's capability disclosure, ON THE SURFACE (F51, resolved chunk 11).
+      // Chunk 10 moved it into the switcher drawer, where it was true but behind
+      // a click. Step 14 is deploy and real people will be holding real links;
+      // this sentence is what stops someone treating a capability URL as private,
+      // and it can only do that if it is visible without being looked for.
+      h('p', { key: 'capability', className: 'hint capability' }, [
+        'Anyone with this link can read and edit every document in it. There is no login — the link ',
+        h('em', { key: 'is' }, 'is'),
+        ' the key. Share it the way you would share a key.',
+      ]),
     ]),
     h('main', { key: 'workspace', className: 'workspace' }, [
       // The missing-slug screen appears BESIDE the draft pane, which is merely
@@ -237,7 +248,12 @@ export function App({
               state,
               onSubmit: (prompt) => sessionRef.current.submitPrompt(prompt),
             }),
-            h(ModelResponse, { key: 'response' }),
+            h(ModelResponse, {
+              key: 'response',
+              note: state.note,
+              speechOnly: state.speechOnly,
+              pending: state.pending === 'ai',
+            }),
             h(StandingRules, { key: 'rules' }),
           ]),
 

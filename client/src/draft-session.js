@@ -55,6 +55,20 @@ const INITIAL = {
   /** Warnings carried by the most recent AI turn (§2.3). */
   warnings: [],
   stripped: null,
+
+  /**
+   * The model's speech from the most recent AI turn (§0.7), for the Model
+   * Response box. §12: "A new prompt overwrites it" — so this is the CURRENT
+   * turn only, and it is cleared the instant the next prompt is submitted.
+   * Everything earlier lives in the ledger and is reached through the history
+   * view, which is the only scrollback (§4).
+   *
+   * `null` means no turn has spoken yet; `''` would mean a turn spoke and said
+   * nothing, which is a different fact.
+   */
+  note: null,
+  /** True when the most recent AI turn left the draft untouched (§0.9). */
+  speechOnly: false,
 };
 
 /**
@@ -236,14 +250,37 @@ export function createDraftSession({ api, editor, slug, onState }) {
     const markdown = editor.getMarkdown(); // commit boundary — §0.6
 
     // Step 1, before any await: from this instant the editor is read-only.
+    // §12: a new prompt overwrites the Model Response box, so the previous turn's
+    // speech goes now rather than lingering under the pending indicator, where it
+    // would read as an answer to the question being asked.
     applyLock(true);
-    set({ pending: 'ai', locked: true, error: null, notice: null, warnings: [], stripped: null });
+    set({
+      pending: 'ai',
+      locked: true,
+      error: null,
+      notice: null,
+      warnings: [],
+      stripped: null,
+      note: null,
+      speechOnly: false,
+    });
 
     try {
       const result = await api.aiEdit(state.slug, prompt, markdown);
 
       // The AI turn committed: the working draft is now the model's text.
-      editor.setMarkdown(result.draft);
+      //
+      // §0.9's speech-only turn arrives here with a snapshot equal to the draft
+      // that was sent. Setting the editor's content to identical text would still
+      // throw the caret back to the top of the document as the reward for asking
+      // a question, so the content is replaced only when it actually changed —
+      // the same rule a no-op restore already follows.
+      // What the draft was when the model got it: the human turn step 2 minted, or
+      // — when nothing was pending and no human turn was created — the draft as it
+      // already stood.
+      const before = result.human_turn?.snapshot ?? state.draft;
+      const changed = result.draft !== before;
+      if (changed) editor.setMarkdown(result.draft);
       applyLock(false);
       set({
         pending: null,
@@ -253,7 +290,9 @@ export function createDraftSession({ api, editor, slug, onState }) {
         dirty: false,
         warnings: result.ai_turn?.warnings ?? [],
         stripped: result.ai_turn?.stripped ?? null,
-        notice: notifyOf(result),
+        note: result.ai_turn?.note ?? '',
+        speechOnly: !changed,
+        notice: notifyOf(result, changed),
       });
       // An AI turn always commits (§3), so the count always moved.
       await refreshLibrary();
@@ -376,13 +415,27 @@ function describeRestore(result, turnId) {
   return parts.join('; ');
 }
 
-/** What to say after a turn that committed but carried warnings (§2.3). */
-function notifyOf(result) {
+/**
+ * What happened on this turn, as system reporting (§2.3, §4).
+ *
+ * This is NOT the model talking, so it stays in the Prompt box beside the control
+ * that caused it rather than in Model Response, which holds speech and only
+ * speech (§0.7, §12). Chunk 10 recorded that split as F52 and chunk 11 keeps it.
+ *
+ * A speech-only turn (§0.9) says so here: the visible symptom of one is a draft
+ * that did not move, which is indistinguishable from a turn that silently failed
+ * unless something says which it was.
+ */
+function notifyOf(result, changed) {
   const turn = result.ai_turn;
   const human = result.human_turn;
   const parts = [];
   if (human) parts.push(`your hand edits committed as turn ${human.turn_id}`);
-  parts.push(`AI turn ${turn?.turn_id ?? '?'} committed`);
+  parts.push(
+    changed
+      ? `AI turn ${turn?.turn_id ?? '?'} committed`
+      : `AI turn ${turn?.turn_id ?? '?'} committed — no change to the draft`,
+  );
   return parts.join('; ');
 }
 

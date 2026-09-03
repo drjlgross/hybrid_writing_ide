@@ -17,6 +17,7 @@ import { existsSync, unlinkSync } from 'node:fs';
 
 import { DEFAULT_TOKEN } from '../src/addressing.js';
 import { defaultNamespace } from '../src/namespace.js';
+import { validateAiResponse } from '../src/ai-response.js';
 import {
   assertLedgerInvariant,
   createDocument,
@@ -78,8 +79,23 @@ function persist(doc) {
   return saveDocument(doc, { dir: DIR });
 }
 
-// The stub stands in for the model. No network, no API key, no streaming.
-const cannedResponse = (text) => () => text;
+/**
+ * The stub stands in for the model. No network, no API key, no streaming.
+ *
+ * It returns a canned §2.2 envelope THROUGH the real `validateAiResponse`, rather
+ * than handing `submitAiPrompt` a bare string. The point of this script is that
+ * the provenance model still holds after a chunk; a stub that skipped the response
+ * contract would stop exercising the path the app actually takes the moment the
+ * contract changed — which is exactly what chunk 11 changed.
+ */
+const cannedResponse = (text, note) => ({ draft }) => {
+  const envelope = { note };
+  if (text !== undefined) envelope.draft = text;
+  return validateAiResponse(
+    { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(envelope) }] },
+    { draft, prompt: 'smoke' },
+  );
+};
 
 // ── the session ─────────────────────────────────────────────────────────────────
 say('smoke-session — provenance model, driven directly against the store');
@@ -132,12 +148,13 @@ const aiDraftOne = [
 let submission = await submitAiPrompt(doc, {
   pendingDraft: doc.draft, // nothing typed since the checkpoint
   prompt: KNOWN_PROMPT,
-  callModel: cannedResponse(aiDraftOne),
+  callModel: cannedResponse(aiDraftOne, 'Calmer, and the bullet is untouched.'),
 });
 doc = persist(submission.doc);
 check(submission.humanTurn === null, 'no empty human turn, since nothing was typed since turn 1');
 check(submission.aiTurn.turn_id === 2 && submission.aiTurn.author === 'ai', 'turn 2 is an AI turn');
 check(submission.aiTurn.prompt === KNOWN_PROMPT, 'the AI turn stores the exact prompt string');
+check(submission.aiTurn.note === 'Calmer, and the bullet is untouched.', '§0.7: the AI turn records the model\'s speech');
 checkInvariant(doc, 'the AI turn');
 
 // (d) another human turn: a hand edit on top of the AI output
@@ -179,12 +196,34 @@ const aiDraftTwo = [
 submission = await submitAiPrompt(doc, {
   pendingDraft: doc.draft,
   prompt: SECOND_PROMPT,
-  callModel: cannedResponse(aiDraftTwo),
+  callModel: cannedResponse(aiDraftTwo, 'Named the docs the bullet actually points at.'),
 });
 doc = persist(submission.doc);
 check(submission.aiTurn.turn_id === 5 && submission.aiTurn.author === 'ai', 'turn 5 is an AI turn');
 check(submission.aiTurn.prompt === SECOND_PROMPT, 'the second AI turn stores its own exact prompt');
 checkInvariant(doc, 'the second AI turn');
+
+// (g) a speech-only turn — §0.9's degenerate case
+step('g', 'commit a speech-only AI turn: a note, and no change to the draft');
+const QUESTION = 'Weigh in on the change I just made — do not touch the draft.';
+const draftBefore = doc.draft;
+const historyBeforeSpeech = doc.history.length;
+
+submission = await submitAiPrompt(doc, {
+  pendingDraft: doc.draft,
+  prompt: QUESTION,
+  callModel: cannedResponse(undefined, 'The bullet now names the thing it links to. Leave it.'),
+});
+doc = persist(submission.doc);
+
+const speechTurn = submission.aiTurn;
+check(speechTurn.turn_id === 6 && speechTurn.author === 'ai', 'turn 6 is an AI turn');
+check(doc.history.length === historyBeforeSpeech + 1, '§3: a speech-only turn is NOT an empty turn');
+check(speechTurn.prompt === QUESTION, 'it stores the exact prompt string');
+check(/Leave it\./.test(speechTurn.note), '§0.7: and the model\'s speech');
+check(speechTurn.snapshot === draftBefore, '§0.9: the snapshot carries the prior text unchanged');
+check(doc.draft === draftBefore, 'and the working draft did not move');
+checkInvariant(doc, 'the speech-only turn');
 
 // ── the ledger ──────────────────────────────────────────────────────────────────
 const reloaded = loadDocument(SLUG, { dir: DIR });
@@ -199,6 +238,7 @@ for (const entry of reloaded.history) {
   say(`  turn ${entry.turn_id}  [${entry.author.toUpperCase().padEnd(5)}]  ${entry.timestamp}`);
   say(`    prompt:   ${entry.author === 'ai' ? JSON.stringify(entry.prompt) : '—'}`);
   say(`    snapshot: ${first80}${entry.snapshot.length > 80 ? '…' : ''}`);
+  if (entry.note !== undefined) say(`    note:     ${JSON.stringify(entry.note)}`);
   if (entry.warnings?.length) say(`    warnings: ${entry.warnings.join('; ')}`);
 }
 
@@ -206,5 +246,7 @@ say('\n────────────────────────�
 say(`${reloaded.history.length} turns, ${checks} assertions passed.`);
 say('Human turns hold only hand edits; AI turns hold only model changes, with the');
 say('prompt that caused them. Turn 3 survives the restore at turn 4 — history is');
-say('append-only, so nothing the human wrote was destroyed by going back.');
+say('append-only, so nothing the human wrote was destroyed by going back. Turn 6');
+say('changed nothing and is kept anyway: the note and the unchanged snapshot are a');
+say('positive assertion that the model was asked something and touched no text.');
 say('────────────────────────────────────────────────────────────────────────────');

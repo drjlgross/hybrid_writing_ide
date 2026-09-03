@@ -13,12 +13,23 @@
  *    representation of the same fact, free to drift from the text it describes.
  *
  * 3. MODEL SPEECH AND MODEL EDITS ARE DISTINCT RECORDS, and this UI never blends
- *    them. `.turn-speech` holds what the model SAID about the turn — today that is
- *    the §2.3 warnings, tomorrow it is a conversation channel — and `.turn-changes`
- *    holds what it DID. They are sibling regions with their own labels, so adding a
- *    reply channel is a new child of `.turn-speech` and not a rearrangement. The
- *    human's instruction is neither: it is the turn's provenance, and it sits in the
- *    record header with the author and the timestamp.
+ *    them (§0.7, §4, §9 S12). A turn now carries THREE separable records and each
+ *    one is its own labelled region:
+ *
+ *      .turn-speech    the model's `note` — what it SAID (§0.7)
+ *      .turn-reported  the §2.3 warnings and stripped counts — what the SYSTEM
+ *                      observed about the response
+ *      .turn-changes   the diff — what the turn DID
+ *
+ *    Chunk 8 put the warnings in `.turn-speech` because it was the only non-diff
+ *    record a turn had. It is not speech: a validation warning is the system
+ *    reporting, not the model talking (chunk 10's F52), and now that real speech
+ *    exists the two cannot share a box without blending exactly what §9's S12
+ *    forbids. So `.turn-speech` is the note, and the warnings moved out into
+ *    `.turn-reported`. Named in the chunk-11 report.
+ *
+ *    The human's instruction is none of the three: it is the turn's provenance,
+ *    and it sits in the record header with the author and the timestamp.
  */
 
 import { useMemo, useState } from 'react';
@@ -72,6 +83,8 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
   // snapshot pair, so opening a turn or re-rendering the panel does not re-diff.
   const parts = useMemo(() => wordDiff(previous, turn.snapshot), [previous, turn.snapshot]);
   const changed = parts.some((part) => part.added || part.removed);
+  // §0.9's degenerate case: an AI turn that spoke and touched no text.
+  const isSpeechOnly = isAi && !changed && typeof turn.note === 'string' && turn.note !== '';
 
   // ── the record header: who, when, and what they were asked ────────────────────
   const header = h('div', { key: 'head', className: 'turn-head' }, [
@@ -110,17 +123,35 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
       ])
     : null;
 
-  // ── MODEL SPEECH ──────────────────────────────────────────────────────────────
-  // What the model said about this turn, as opposed to what it did to the text.
-  // Today: the §2.3 warnings and the structured stripped counts. A conversation
-  // channel would be another child of this region and nothing else would move.
+  // ── MODEL SPEECH (§0.7) ───────────────────────────────────────────────────────
+  // The model's note: what it SAID, as opposed to what it did to the text. §4
+  // requires it render "as speech, visually distinct from any text change. Never
+  // blended." It is rendered as text, `white-space: pre-wrap` — the same treatment
+  // the Model Response box gives it, for the same reason (see ModelResponse.js).
+  // Gated on `isAi` as well as on the field: §3 gives `note` to AI turns only, and
+  // a human turn rendering one would mean the view had started attributing speech
+  // to whoever's record happened to carry the key.
+  const speech =
+    isAi && typeof turn.note === 'string' && turn.note !== ''
+      ? h(
+          'div',
+          { key: 'speech', className: 'turn-speech', 'aria-label': `What the model said on turn ${turn.turn_id}` },
+          [
+            h('span', { key: 'k', className: 'record-label' }, 'Note'),
+            h('div', { key: 'note', className: 'box-surface' }, turn.note),
+          ],
+        )
+      : null;
+
+  // ── WHAT THE SYSTEM OBSERVED (§2.3) ──────────────────────────────────────────
+  // Warnings and stripped counts. NOT the model talking — see the header note.
   const warnings = turn.warnings ?? [];
   const stripped = turn.stripped ?? null;
-  const speech =
+  const reported =
     warnings.length > 0 || stripped
       ? h(
           'div',
-          { key: 'speech', className: 'turn-speech', 'aria-label': `What the model reported about turn ${turn.turn_id}` },
+          { key: 'reported', className: 'turn-reported', 'aria-label': `What was reported about turn ${turn.turn_id}` },
           [
             h('span', { key: 'k', className: 'record-label' }, 'Reported'),
             warnings.length > 0
@@ -157,11 +188,20 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
         ? h('p', { key: 'diff', className: 'diff' }, diffElements(parts))
         : h(
             'p',
-            { key: 'nochange', className: 'diff diff-empty' },
-            // §3: an AI turn commits even when the model returned identical text,
-            // because the prompt is provenance. Saying so beats an empty box.
+            { key: 'nochange', className: `diff diff-empty${isAi ? ' diff-unchanged' : ''}` },
+            // §4: "A speech-only turn renders as a note with an explicit 'no change
+            // to the draft' marker. It must not look like a rendering failure."
+            // §0.9 is why the wording is a positive assertion rather than an
+            // apology: an unchanged snapshot is the model stating that it touched
+            // nothing, which is stronger than the absence of a record.
+            //
+            // The other AI case — the model returned text that happened to be
+            // identical — reads the same from the ledger and says the same thing.
+            // §3 keeps both, because the prompt is provenance either way.
             isAi
-              ? 'The model returned the draft unchanged. The turn is kept because the instruction is a fact about the session.'
+              ? isSpeechOnly
+                ? 'No change to the draft. The model answered without proposing a revision, and the turn is kept because the question and the answer are facts about the session.'
+                : 'No change to the draft. The model returned the draft unchanged, and the turn is kept because the instruction is a fact about the session.'
               : 'No change to the text.',
           ),
     ],
@@ -189,6 +229,7 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
       header,
       instruction,
       speech,
+      reported,
       changes,
       h(
         'button',

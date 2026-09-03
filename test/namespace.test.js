@@ -24,6 +24,7 @@ import {
 } from '../src/addressing.js';
 import { InvalidTokenError, defaultNamespace, generateToken, resolveNamespace } from '../src/namespace.js';
 import { createServer } from '../src/server.js';
+import { modelResponse } from './helpers/model-response.js';
 import { DEFAULT_DOCUMENTS_DIR, createDocument, loadDocument, saveDocument } from '../src/storage.js';
 import { commitHumanTurn } from '../src/turns.js';
 
@@ -34,7 +35,8 @@ function freshRoot() {
   return mkdtempSync(join(TMP_ROOT, 'namespace-'));
 }
 
-const ok = (text) => ({ stop_reason: 'end_turn', content: [{ type: 'text', text }] });
+/** A well-formed §2.2 response proposing `text` as the revised draft. */
+const ok = (text) => modelResponse(text);
 
 async function serve(app) {
   const server = await new Promise((resolve) => {

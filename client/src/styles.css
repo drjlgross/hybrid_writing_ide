@@ -289,13 +289,27 @@ body {
   font-size: 0.95rem;
 }
 
-/* An empty box that says what it is for, rather than a blank one that reads as
-   a rendering failure (§4 makes the same demand of a speech-only turn). */
+/* An empty box says what it is for, rather than being blank and reading as a
+   rendering failure (§4 makes the same demand of a speech-only turn). In the rail
+   this text sits inside `.box-surface`, above. */
 .box-empty {
   margin: 0;
 }
 
-.box textarea {
+/* THE CONTENT SURFACE (§12).
+ *
+ * Every box in the rail has one, at all times, whether or not it has content —
+ * so the three read as three parallel boxes at first paint rather than one form
+ * beside two captions. The empty-state text renders INSIDE it, in the muted
+ * colour, which is exactly what the Prompt textarea's placeholder does: an empty
+ * box is a box with nothing typed in it yet, not a box with no surface.
+ *
+ * ONE rule for the textarea and the surface, not two rules that match. §12 asks
+ * for matching anatomy; a single selector list makes that structural rather than
+ * a claim a test has to keep re-checking. Anything that must differ between them
+ * is in the two small rules below. */
+.box textarea,
+.box-surface {
   width: 100%;
   font: inherit;
   font-size: 0.9rem;
@@ -303,7 +317,35 @@ body {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: #fff;
+}
+
+.box textarea {
   resize: vertical;
+}
+
+/* `pre-wrap` because the note is Markdown rendered as text: the model's own line
+   breaks and bullets are most of what its formatting was doing, and there is no
+   Markdown-to-HTML renderer among the packages §5 names. `overflow-wrap` because
+   a pasted URL in a 22rem column would otherwise push the whole rail wide. The
+   min-height keeps an empty surface from reading as a sliver — it is a surface
+   waiting for content, and it should look like one. */
+.box-surface {
+  min-height: 4.5rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The empty state, INSIDE the surface. Same muted colour the textarea gives its
+   placeholder, and for the same reason. */
+.box-surface .box-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Which of the two things a turn could have produced this one did (§0.9). Muted:
+   it is a fact about the turn, not part of what the model said. */
+.note-scope {
+  margin: 0.5rem 0 0;
 }
 
 /* §12: `+` bottom-left, Submit bottom-right. */
@@ -625,9 +667,23 @@ body {
   font-style: italic;
 }
 
-/* MODEL SPEECH. Separated from the changes below by a rule and a colour, not by
-   spacing alone. A conversation channel joins this box; nothing moves. */
+/* MODEL SPEECH (§0.7, §4). What the model SAID. Separated from the changes below
+   by a rule and a surface, not by spacing alone.
+
+   It wears the same white `.box-surface` the Model Response box uses, so the
+   same record looks like itself in both places: the panel shows this turn's
+   speech, the history shows every turn's, and a reader moving between them is
+   looking at one kind of thing. */
 .turn-speech {
+  margin-top: 0.8rem;
+}
+
+/* WHAT THE SYSTEM OBSERVED (§2.3). Warnings and stripped counts — NOT speech, and
+   deliberately not the same treatment: this is the app reporting on a response,
+   and blending it with the model's own words is what §9's S12 forbids. The amber
+   dashed border is what the warnings have worn since chunk 8; it stayed with them
+   when the note took over `.turn-speech`. */
+.turn-reported {
   margin-top: 0.8rem;
   padding: 0.6rem 0.75rem;
   border: 1px dashed var(--warn);
@@ -637,7 +693,7 @@ body {
   font-size: 0.8rem;
 }
 
-.turn-speech .record-label {
+.turn-reported .record-label {
   color: inherit;
 }
 

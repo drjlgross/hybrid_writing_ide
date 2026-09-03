@@ -20,10 +20,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { App } from '../client/src/App.js';
+import { ModelResponse } from '../client/src/ModelResponse.js';
 import { PromptBox } from '../client/src/PromptBox.js';
-import { saveJson } from '../client/src/transcript.js';
+import { buildTranscript, saveJson } from '../client/src/transcript.js';
 import { Toolbar } from '../client/src/Toolbar.js';
 import { h } from '../client/src/h.js';
+import { SCHEMA_VERSION } from '../src/schema.js';
 import { LINK_OPTIONS } from '../src/tiptap-config.js';
 import { serializeEditorMarkdown } from '../src/tiptap-serialize.js';
 import { createEditor } from './helpers/headless-editor.js';
@@ -1078,10 +1080,6 @@ test('§12 the document name opens the switcher and closes it again', async () =
     assert.equal(view.find('.doc-name').getAttribute('aria-expanded'), 'true');
     assert.ok(view.find('.top-drawer .doc-list'), 'the documents in this namespace');
 
-    // §0.5's disclosure has to survive the removal of the old status row: anyone
-    // handed a capability link must be told what the link gives them.
-    assert.match(view.text(), /the link .*is.* the key/s);
-
     await view.click(view.find('.doc-name'));
     assert.equal(count(view, '.top-drawer'), 0, 'and it closes again');
   } finally {
@@ -1161,6 +1159,12 @@ test('§4 Export transcript saves the whole ledger as JSON', async () => {
     assert.equal(view.saved.length, 1, 'one file, from one click');
     const { filename, data } = view.saved[0];
     assert.equal(filename, 'draft-transcript.json', 'named for the document it came from');
+    assert.deepEqual(
+      Object.keys(data),
+      ['schema_version', 'slug', 'exported_at', 'turns'],
+      '§4 pins the wrapper shape, and nothing else may join it silently',
+    );
+    assert.equal(data.schema_version, SCHEMA_VERSION, 'the SAME constant the store writes');
     assert.equal(data.slug, 'draft');
     assert.match(data.exported_at, /^\d{4}-\d\d-\d\dT/, '§11 K4: when it was taken is part of the record');
 
@@ -1236,7 +1240,7 @@ test('saveJson hands the browser a named, downloadable JSON file, then lets it g
     }),
   };
 
-  saveJson('t.json', { slug: 'draft', turns: [] }, {
+  saveJson('t.json', buildTranscript('draft', LEDGER, new Date('2026-09-03T09:00:00.000Z')), {
     document: fakeDocument,
     Blob: FakeBlob,
     URL: {
@@ -1250,7 +1254,44 @@ test('saveJson hands the browser a named, downloadable JSON file, then lets it g
   assert.equal(clicked[0].href, 'blob:fake');
   assert.equal(clicked[0].attached, true, 'attached before the click — Firefox ignores a detached one');
   assert.deepEqual(revoked, ['blob:fake'], 'and the blob is released, not left alive for the tab');
-  assert.deepEqual(JSON.parse(blobParts[0]), { slug: 'draft', turns: [] });
+
+  // §0.5 / §4: the assertion is made on THE FILE, not on the object handed to the
+  // writer. `schema_version` exists so a transcript can be read by a build that
+  // did not write it, and the only thing that reader ever sees is these bytes.
+  const written = JSON.parse(blobParts[0]);
+  assert.equal(written.schema_version, SCHEMA_VERSION, 'the exported FILE carries a schema version');
+  assert.equal(written.slug, 'draft');
+  assert.equal(written.exported_at, '2026-09-03T09:00:00.000Z');
+  assert.deepEqual(written.turns, LEDGER, 'and the whole ledger, verbatim');
+  assert.match(blobParts[0], /^\{\n  "schema_version": 1,/, 'and it is readable JSON, not one long line');
+});
+
+test('§4 a transcript carries the model\'s speech, because the note is on the turn', async () => {
+  // §9's S13: the conversation has the ledger's durability guarantee because it
+  // IS the ledger. An export that dropped the notes would be the side channel
+  // §0.7 was written to avoid.
+  const spoken = [
+    LEDGER[0],
+    {
+      ...LEDGER[1],
+      note: 'I read this as a copy edit, not a reframe.',
+      segments: [{ id: 's1', took: 'a copy edit', kind: 'edit' }],
+    },
+  ];
+  const view = await mountApp({
+    api: { load: async () => ({ draft: 'The version the model made worse.\n', history: spoken }) },
+  });
+
+  try {
+    await view.click(view.findByText('button', 'Export transcript'));
+    const { data } = view.saved[0];
+
+    assert.equal(data.turns[1].note, 'I read this as a copy edit, not a reframe.');
+    assert.deepEqual(data.turns[1].segments, [{ id: 's1', took: 'a copy edit', kind: 'edit' }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(data)), data, 'and it survives the file it becomes');
+  } finally {
+    await view.unmount();
+  }
 });
 
 // ── §12: the right column ───────────────────────────────────────────────────────
@@ -1273,17 +1314,16 @@ test('§12 the right column is three boxes, top to bottom, in the spec\'s order'
   }
 });
 
-test('§12 the two boxes this chunk leaves empty say what they are for', async () => {
+test('§12 a box with nothing in it yet says what it is for', async () => {
   // §4 requires that a speech-only turn "must not look like a rendering failure".
   // A box that has never been filled at all is the same hazard.
   const view = await mountApp();
 
   try {
-    assert.match(view.find('.box-response').textContent, /nothing to say yet/);
+    assert.match(view.find('.box-response').textContent, /nothing to say yet/, 'before any turn has spoken');
     assert.match(view.find('.box-rules').textContent, /none yet/);
 
-    // Empty means empty: no behaviour was built into either one this chunk.
-    assert.equal(count(view, '.box-response button'), 0);
+    // Standing Rules is still empty by design: §10's human-written half is step 12.
     assert.equal(count(view, '.box-rules button'), 0);
     assert.equal(count(view, '.box-rules input'), 0);
     assert.equal(count(view, '.box-rules li'), 0);
@@ -1343,6 +1383,295 @@ function token(name) {
   assert.ok(match, `--${name} must be declared in the stylesheet`);
   return match[1];
 }
+
+// ── §0.7 / §12: the Model Response box ─────────────────────────────────────────
+
+test('§12 the Model Response box populates with the model\'s note, end to end', async () => {
+  // Through the whole client path — submit, commit, re-render — because the
+  // question is whether the speech REACHES the screen, not whether the component
+  // can display one when handed it.
+  const view = await mountApp({
+    draft: 'The stored draft.\n',
+    api: {
+      aiEdit: async () => ({
+        draft: 'The revision.\n',
+        human_turn: null,
+        ai_turn: {
+          turn_id: 2,
+          author: 'ai',
+          prompt: 'tighten it',
+          note: 'I read this as a copy edit, not a reframe. The second paragraph is untouched.',
+        },
+        history: [{ turn_id: 1 }, { turn_id: 2 }],
+      }),
+    },
+  });
+
+  try {
+    assert.match(view.find('.box-response').textContent, /nothing to say yet/, 'empty before the turn');
+
+    await view.type(view.find('textarea'), 'tighten it');
+    await view.click(view.findByText('button', 'Submit'));
+    await view.flush();
+
+    const box = view.find('.box-response');
+    assert.match(box.textContent, /I read this as a copy edit/, '§0.7: the model spoke and it is on screen');
+    assert.doesNotMatch(box.textContent, /nothing to say yet/, 'and the empty state is gone');
+
+    // §12: the panel never restates the draft. The model's TEXT is in the editor,
+    // and the box must not be showing it as well.
+    assert.doesNotMatch(box.textContent, /The revision\./, 'the panel never restates the draft');
+    assert.equal(serializeEditorMarkdown(view.editor()), 'The revision.\n', 'the text landed in the draft');
+
+    // §12's addition (chunk 11): a white surface matching the Prompt textarea.
+    assert.ok(box.querySelector('.box-surface'), 'the note is on the box surface');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§12 the surface and the Prompt textarea are ONE rule, not two that match', () => {
+  // §12 asks for matching anatomy across the three boxes. Chunk 11 asserted the
+  // two rules carried the same four declarations, which could only ever catch a
+  // drift after it happened. They are now a single selector list, so "matching"
+  // is structural and there is nothing left to drift.
+  const shared = /\.box textarea,\s*\n\.box-surface \{([^}]*)\}/.exec(STYLESHEET);
+  assert.ok(shared, 'the textarea and the surface must be declared together');
+
+  for (const declaration of [
+    'background: #fff',
+    'border: 1px solid var(--line)',
+    'border-radius: 4px',
+    'padding: 0.6rem',
+    'width: 100%',
+  ]) {
+    assert.ok(shared[1].includes(declaration), `the shared surface rule should carry "${declaration}"`);
+  }
+
+  // And the surface wraps rather than widening the rail, which a pasted URL would
+  // do, and is not a sliver when it is empty.
+  // Negative lookbehind so this finds the STANDALONE rule, not the shared block
+  // above, whose selector list ends `,\n.box-surface {`.
+  const surfaceOnly = /(?<!,\n)^\.box-surface \{([^}]*)\}/m.exec(STYLESHEET)[1];
+  assert.match(surfaceOnly, /white-space: pre-wrap/, 'the note is Markdown rendered as text');
+  assert.match(surfaceOnly, /overflow-wrap: anywhere/);
+  assert.match(surfaceOnly, /min-height/, 'an empty surface is still a surface, not a line');
+
+  // The empty state is muted INSIDE the surface — the textarea's placeholder,
+  // exactly. If this rule went, an empty box would render as full-strength body
+  // text and read as content rather than as a placeholder.
+  assert.match(/\.box-surface \.box-empty \{([^}]*)\}/.exec(STYLESHEET)[1], /color: var\(--muted\)/);
+});
+
+test('§12 all three boxes render a white content surface at first paint', async () => {
+  // The rail must read as three parallel boxes before anything has happened —
+  // not one form beside two captions. This is the state the screenshot in the
+  // chunk-11-fix report shows.
+  const view = await mountApp();
+
+  try {
+    const boxes = view.findAll('.rail .box');
+    assert.equal(boxes.length, 3);
+
+    for (const box of boxes) {
+      const heading = box.querySelector('h2').textContent;
+      const surface = box.querySelector('.box-surface, textarea');
+      assert.ok(surface, `${heading} must have a content surface before it has content`);
+    }
+
+    // Specifically the two that had none: their anatomy is now the Prompt box's.
+    assert.ok(view.find('.box-response .box-surface'), 'Model Response');
+    assert.ok(view.find('.box-rules .box-surface'), 'Standing Rules');
+
+    // And the empty-state sentence is INSIDE the surface, not standing in for it.
+    for (const selector of ['.box-response', '.box-rules']) {
+      const box = view.find(selector);
+      const empty = box.querySelector('.box-empty');
+      assert.ok(empty, `${selector} still says what it is for`);
+      assert.ok(
+        box.querySelector('.box-surface').contains(empty),
+        `${selector}'s empty state renders inside the surface, not in place of it`,
+      );
+    }
+
+    assert.match(view.find('.box-response').textContent, /nothing to say yet/);
+    assert.match(view.find('.box-rules').textContent, /none yet/);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§12 a new prompt overwrites the response, and the pending state is not an empty box', async () => {
+  const gate = deferred();
+  const view = await mountApp({
+    api: {
+      aiEdit: async () => {
+        await gate.promise;
+        return okTurn('The revision.\n', {
+          ai_turn: { turn_id: 2, author: 'ai', prompt: 'p', note: 'The answer.' },
+        });
+      },
+    },
+  });
+
+  try {
+    await view.type(view.find('textarea'), 'tighten it');
+    await view.click(view.findByText('button', 'Submit'));
+
+    // In flight: the box says what is happening rather than showing the state it
+    // was in before the turn started, which would say nothing is.
+    const pending = view.find('.box-response');
+    assert.match(pending.textContent, /Waiting for the model/);
+    assert.doesNotMatch(pending.textContent, /nothing to say yet/);
+    // The surface does not come and go — only what is on it does (§12).
+    assert.ok(pending.querySelector('.box-surface'), 'the surface is structural, not conditional');
+
+    gate.resolve();
+    await view.flush();
+    assert.match(view.find('.box-response').textContent, /The answer\./);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§0.9 a speech-only turn shows the note and says the draft did not move', async () => {
+  const view = await mountApp({
+    draft: 'The biology is the reason.\n',
+    api: {
+      aiEdit: async () => ({
+        // §0.9: the snapshot carries the prior text unchanged.
+        draft: 'The biology is the reason.\n',
+        human_turn: null,
+        ai_turn: {
+          turn_id: 2,
+          author: 'ai',
+          prompt: 'weigh in on the change I just made',
+          note: 'You moved the claim to the front. That is the right order.',
+        },
+        history: [{ turn_id: 1 }, { turn_id: 2 }],
+      }),
+    },
+  });
+
+  try {
+    await view.type(view.find('textarea'), 'weigh in on the change I just made');
+    await view.click(view.findByText('button', 'Submit'));
+    await view.flush();
+
+    const box = view.find('.box-response');
+    assert.match(box.textContent, /You moved the claim to the front/);
+    assert.match(box.textContent, /No change to the draft/, '§0.9, stated positively');
+    assert.match(box.textContent, /speech only/);
+
+    // The turn committed and the app says so — as system reporting, in the Prompt
+    // box, not in Model Response (F52).
+    const notice = view.find('.box-prompt .status.notice');
+    assert.ok(notice, 'the turn outcome is reported beside the control that caused it');
+    assert.match(notice.textContent, /no change to the draft/);
+    assert.equal(count(view, '.box-response .status'), 0, 'and no system reporting in the speech box');
+    assert.equal(count(view, '.status.error'), 0, 'a speech-only turn is not a failure');
+
+    // The draft is exactly what it was.
+    assert.equal(serializeEditorMarkdown(view.editor()), 'The biology is the reason.\n');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§9 S12 the panel never blends speech with the system\'s own reporting', async () => {
+  // Both at once: the model said something AND the response tripped a §2.3 guard.
+  // They are different records and they go to different boxes (F52, kept).
+  const view = await mountApp({
+    api: {
+      aiEdit: async () =>
+        okTurn('The revision.\n', {
+          ai_turn: {
+            turn_id: 2,
+            author: 'ai',
+            prompt: 'restructure it',
+            note: 'I have left the second paragraph alone; you did not ask about it.',
+            warnings: ['stripped: 2 headings, 1 blockquote'],
+            stripped: { heading: 2, blockquote: 1 },
+          },
+        }),
+    },
+  });
+
+  try {
+    await view.type(view.find('textarea'), 'restructure it');
+    await view.click(view.findByText('button', 'Submit'));
+    await view.flush();
+
+    const response = view.find('.box-response');
+    const warning = view.find('.box-prompt .status.warning');
+    assert.ok(response && warning);
+
+    assert.match(response.textContent, /left the second paragraph alone/);
+    assert.doesNotMatch(response.textContent, /stripped/, 'a validation warning is not speech');
+    assert.match(warning.textContent, /2 headings/);
+    assert.doesNotMatch(warning.textContent, /second paragraph alone/, 'and speech is not a warning');
+
+    // Different boxes, not merely different paragraphs.
+    assert.equal(response.contains(warning), false);
+    assert.equal(warning.contains(response), false);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('a turn that spoke and said nothing is not rendered as a box that failed to load', async () => {
+  // §0.7 requires a note on every turn, so an empty one is an anomaly rather than
+  // a state — and §4's rule that a no-change turn must not look like a rendering
+  // failure applies with more force here, not less.
+  const view = await render(h(ModelResponse, { note: '' }));
+  try {
+    assert.match(view.text(), /the model said nothing/);
+    assert.ok(view.find('.box-surface'), 'the surface stays; what is on it is the sentence');
+    assert.ok(
+      view.find('.box-surface').contains(view.find('.box-empty')),
+      'and the sentence is on the surface, not in place of it',
+    );
+  } finally {
+    await view.unmount();
+  }
+
+  const never = await render(h(ModelResponse, { note: null }));
+  try {
+    assert.match(never.text(), /nothing to say yet/, 'and "not yet" is a different sentence from "nothing"');
+  } finally {
+    await never.unmount();
+  }
+});
+
+// ── §0.5: the capability disclosure (F51, resolved) ────────────────────────────
+
+test('§0.5 the capability disclosure is on the surface, not behind a click', async () => {
+  // F51. Chunk 10 moved this sentence into the switcher drawer; step 14 is deploy
+  // and real people will hold real links, so it is back on the page. A disclosure
+  // you have to go looking for does not stop anyone treating a capability URL as
+  // private, which is the one thing it is for.
+  const view = await mountApp();
+
+  try {
+    const disclosure = view.find('.masthead .capability');
+    assert.ok(disclosure, 'visible without opening anything');
+    assert.match(disclosure.textContent, /the link .*is.* the key/s);
+    assert.match(disclosure.textContent, /no login/i);
+    assert.match(disclosure.textContent, /read and edit/, 'and says what the link actually grants');
+
+    // Not inside a drawer, and not in the workspace where it would compete with
+    // the draft. It is a permanent part of the header.
+    assert.equal(count(view, '.top-drawer .capability'), 0);
+    assert.equal(count(view, '.workspace .capability'), 0);
+
+    // One copy, not two: with the sentence on the surface, repeating it inside the
+    // switcher would be noise in a menu.
+    await view.click(view.find('.doc-name'));
+    assert.equal(count(view, '.capability'), 1, 'still exactly one, with the switcher open');
+  } finally {
+    await view.unmount();
+  }
+});
 
 test('§12 lilac is checked for contrast against the cream ground, not eyeballed', () => {
   const paper = token('paper');

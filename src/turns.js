@@ -71,11 +71,23 @@ export const checkpoint = commitHumanTurn;
  * prompt is provenance, and a prompt that changed nothing is a fact about the
  * session worth keeping. See the report for the §3/§2.4 tension.
  *
+ * `note` is the model's SPEECH (§0.7) and it is recorded here, in the ledger,
+ * beside the snapshot — not in a side channel. §9's S13 is the reason: the
+ * conversation has the same durability guarantee as the ledger because it is in
+ * the ledger. Storing them in one record does not blend them; §12's separation is
+ * a rendering rule, and the two are rendered apart (History.js, ModelResponse.js).
+ *
+ * A speech-only turn (§0.9's degenerate case) reaches this function with `draft`
+ * equal to the current draft. It commits, and its snapshot equalling the previous
+ * one is a positive assertion that the model touched nothing — which is stronger
+ * than the absence of a record.
+ *
  * @param {object} doc
- * @param {{draft: string, prompt: string, warnings?: string[], stripped?: Record<string, number>, now?: Date}} options
+ * @param {{draft: string, prompt: string, note?: string, segments?: object[],
+ *   warnings?: string[], stripped?: Record<string, number>, now?: Date}} options
  * @returns {{doc: object, turn: object}}
  */
-export function commitAiTurn(doc, { draft, prompt, warnings, stripped, now = new Date() }) {
+export function commitAiTurn(doc, { draft, prompt, note, segments, warnings, stripped, now = new Date() }) {
   assertLedgerInvariant(doc);
 
   if (typeof prompt !== 'string' || prompt.trim() === '') {
@@ -83,6 +95,9 @@ export function commitAiTurn(doc, { draft, prompt, warnings, stripped, now = new
   }
   if (typeof draft !== 'string') {
     throw new TypeError(`an AI turn needs the revised draft as a string, got ${typeof draft}`);
+  }
+  if (note !== undefined && typeof note !== 'string') {
+    throw new TypeError(`an AI turn's note is the model's prose, so a string, got ${typeof note}`);
   }
 
   const turn = {
@@ -92,6 +107,15 @@ export function commitAiTurn(doc, { draft, prompt, warnings, stripped, now = new
     prompt, // exactly as the human typed it — never trimmed or normalized
     snapshot: canonicalize(draft),
   };
+
+  // §0.7: every AI turn returns a note, so the field is present on every AI turn
+  // even when the model said nothing — an empty note is a fact, and a missing key
+  // would be indistinguishable from a turn written before speech existed.
+  if (note !== undefined) turn.note = note;
+
+  // §2.2's decomposition. Stored from now, surfaced in step 15 (§9 S2, provisional).
+  if (segments?.length) turn.segments = segments.map((segment) => ({ ...segment }));
+
   if (warnings?.length) turn.warnings = [...warnings];
 
   // §2.3 requires the stripped counts as structured data on the turn, not only as
@@ -141,10 +165,12 @@ export async function submitAiPrompt(doc, {
   const result = await callModel({ doc: afterHuman, draft: afterHuman.draft, prompt, humanTurn });
   const revised = typeof result === 'string' ? { draft: result } : result;
 
-  // Step 6: the AI turn.
+  // Step 6: the AI turn, carrying the model's speech (§0.7) as well as its text.
   const { doc: afterAi, turn: aiTurn } = commitAiTurn(afterHuman, {
     draft: revised.draft,
     prompt,
+    note: revised.note,
+    segments: revised.segments,
     warnings: revised.warnings,
     stripped: revised.stripped,
     now: now(),

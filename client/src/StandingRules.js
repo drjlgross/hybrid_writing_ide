@@ -10,6 +10,12 @@
  * never trigger a turn (§0.10) — supplying an instruction and asking for an edit
  * are different acts, and conflating them produces the unrequested rewrite that
  * the evidence says most reliably destroys trust.
+ *
+ * The white `.box-surface` is here from now, though, and it is not decoration:
+ * §12 makes the surface structural rather than conditional, so all three boxes in
+ * the rail read as three parallel boxes at first paint. The empty sentence sits
+ * INSIDE it. When step 12 fills this box, the editable list replaces the sentence
+ * on the surface that is already there — a change of content, not of anatomy.
  */
 
 import { h } from './h.js';
@@ -17,11 +23,13 @@ import { h } from './h.js';
 export function StandingRules() {
   return h('section', { className: 'box box-rules' }, [
     h('h2', { key: 'h' }, 'Standing Rules'),
-    h(
-      'p',
-      { key: 'empty', className: 'hint box-empty' },
-      'Corrections you want to hold across every turn will live here. There are none yet.',
-    ),
+    h('div', { key: 'surface', className: 'box-surface' }, [
+      h(
+        'p',
+        { key: 'empty', className: 'box-empty' },
+        'Corrections you want to hold across every turn will live here. There are none yet.',
+      ),
+    ]),
   ]);
 }
 

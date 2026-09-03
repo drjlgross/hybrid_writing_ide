@@ -10,9 +10,11 @@
  *
  *   - The diff must come from the SNAPSHOTS, at display time. A turn that carried a
  *     stored diff would be a second copy of the same fact, free to drift (§0.4).
- *   - Model speech and model edits must not blend. A stripped table renders in the
- *     diff as run-together prose, so if the warning about it sits inside the diff
- *     the reader has no way to tell the report from the text (§2.3).
+ *   - Model speech, system reporting and model edits must not blend (§4, §9 S12).
+ *     A turn now carries three separable records — the model's `note`, the §2.3
+ *     warnings, and the diff — and each one is its own labelled region. A stripped
+ *     table renders in the diff as run-together prose, so a warning sitting inside
+ *     the diff leaves the reader no way to tell the report from the text.
  *   - A snapshot must not be mistakable for the live draft (§4).
  */
 
@@ -213,6 +215,7 @@ test('§3 an AI turn that changed nothing says so rather than showing an empty d
   try {
     const newest = view.findAll('.turn')[0];
     assert.ok(newest.querySelector('.diff-empty'), 'a no-op turn needs an explanation, not a blank');
+    assert.match(newest.textContent, /No change to the draft/);
     assert.match(newest.textContent, /returned the draft unchanged/);
     assert.match(newest.textContent, /make it better/, 'and the prompt is still the record');
     assert.equal(newest.querySelectorAll('ins').length, 0);
@@ -222,9 +225,95 @@ test('§3 an AI turn that changed nothing says so rather than showing an empty d
   }
 });
 
+// ── §0.7 / §0.9: the model's speech, and the speech-only turn ───────────────────
+
+test('§4 an AI turn renders its note as speech, in its own region', async () => {
+  const view = await mount({
+    history: [
+      human(1, 'The old sentence.\n'),
+      ai(2, 'The new sentence.\n', 'rewrite it', {
+        note: 'I took this as a copy edit, not a reframe. Say so if you meant the latter.',
+      }),
+    ],
+  });
+
+  try {
+    const speech = view.find('.turn-speech');
+    assert.ok(speech, '§0.7: every AI turn returns a note, and the ledger holds it');
+    assert.match(speech.textContent, /I took this as a copy edit/);
+    assert.equal(speech.querySelector('.record-label').textContent, 'Note');
+    assert.match(speech.getAttribute('aria-label'), /said/i);
+
+    // The note wears the same white surface the Model Response box gives it, so
+    // one record looks like itself in both places.
+    assert.ok(speech.querySelector('.box-surface'), 'the note has the panel treatment');
+
+    // It is not the diff, and the diff is not it (§4: never blended).
+    const changes = view.find('.turn-changes');
+    assert.equal(speech.contains(changes), false);
+    assert.doesNotMatch(changes.textContent, /copy edit/, 'the note is not in the diff');
+    assert.doesNotMatch(speech.textContent, /new sentence/, 'and the text is not in the note');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§4 a speech-only turn is a note plus an explicit no-change marker', async () => {
+  // §0.9's degenerate case, and §4's rule about it: "renders as a note with an
+  // explicit 'no change to the draft' marker. It must not look like a rendering
+  // failure." The snapshot is deliberately identical to the turn before it.
+  const view = await mount({
+    history: [
+      human(1, 'The biology is what makes it worth running.\n'),
+      ai(2, 'The biology is what makes it worth running.\n', 'weigh in on the change I just made', {
+        note: 'You moved the claim to the front. That is the right order.',
+      }),
+    ],
+  });
+
+  try {
+    const newest = view.findAll('.turn')[0];
+    assert.match(newest.textContent, /You moved the claim to the front/, 'the speech is the turn');
+    assert.match(newest.textContent, /No change to the draft/, 'and the marker is explicit');
+    assert.match(
+      newest.textContent,
+      /without proposing a revision/,
+      'a speech-only turn says which kind of no-change it was',
+    );
+
+    // It must not read as something that failed to render: every region a reader
+    // would look for is present and populated.
+    assert.ok(newest.querySelector('.turn-speech'), 'the note region');
+    assert.ok(newest.querySelector('.turn-changes'), 'and the changes region, saying there were none');
+    assert.equal(newest.querySelectorAll('ins, del').length, 0, 'and no diff marks, because nothing moved');
+    assert.equal(view.findAll('.turn-reported').length, 0, 'nothing was reported about it');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('a human turn never renders a note region, whatever it carries', async () => {
+  // Defensive: §3 gives `note` to AI turns only, and a human turn growing one
+  // would mean the ledger had started attributing speech to the wrong party.
+  const view = await mount({
+    history: [human(1, 'One.\n'), human(2, 'One.\n', { note: 'this should not be here' })],
+  });
+
+  try {
+    const newest = view.findAll('.turn')[0];
+    assert.equal(newest.querySelector('.badge').textContent, 'Human');
+    assert.equal(view.findAll('.turn-speech').length, 0, 'no speech region on a human turn');
+    assert.doesNotMatch(newest.textContent, /this should not be here/);
+    assert.match(newest.textContent, /No change to the text\./, 'the human wording, not the AI one');
+    assert.doesNotMatch(newest.textContent, /without proposing a revision/);
+  } finally {
+    await view.unmount();
+  }
+});
+
 // ── model speech vs model edits ─────────────────────────────────────────────────
 
-test('§2.3 warnings render as the model REPORTING, in their own region', async () => {
+test('§2.3 warnings render as the SYSTEM reporting, in their own region', async () => {
   const view = await mount({
     history: [
       human(1, 'Some prose to revise at length.\n'),
@@ -239,19 +328,25 @@ test('§2.3 warnings render as the model REPORTING, in their own region', async 
   });
 
   try {
-    const speech = view.find('.turn-speech');
-    assert.ok(speech, 'a turn carrying warnings must show them');
+    const reported = view.find('.turn-reported');
+    assert.ok(reported, 'a turn carrying warnings must show them');
 
-    assert.match(speech.textContent, /2 headings/);
-    assert.match(speech.textContent, /1 blockquote/);
-    assert.match(speech.textContent, /1 table/);
-    assert.match(speech.textContent, /63% shorter/);
+    assert.match(reported.textContent, /2 headings/);
+    assert.match(reported.textContent, /1 blockquote/);
+    assert.match(reported.textContent, /1 table/);
+    assert.match(reported.textContent, /63% shorter/);
     assert.equal(view.findAll('.turn-warnings li').length, 2, 'one line per warning');
+
+    // A warning is the system reporting, not the model talking (chunk 10's F52).
+    // This turn carries no note, so there must be no speech region at all — a
+    // warning must never be mistaken for something the model said.
+    assert.equal(view.findAll('.turn-speech').length, 0, 'a warning is not speech');
 
     // §2.3: the counts are structured data on the turn so the view can RENDER them.
     // Read from that field, not parsed back out of the formatted string.
     const stripped = view.find('.turn-stripped');
     assert.ok(stripped, 'the structured counts are rendered, not only the sentence');
+    assert.ok(reported.contains(stripped), 'and they sit with the report, not with the speech');
     assert.deepEqual(
       [...stripped.querySelectorAll('dt')].map((n) => n.textContent),
       ['heading', 'blockquote', 'table'],
@@ -262,11 +357,12 @@ test('§2.3 warnings render as the model REPORTING, in their own region', async 
   }
 });
 
-test('model speech and model edits are separate records — the UI never blends them', async () => {
+test('speech, report and edits are three separate records — the UI never blends them', async () => {
   const view = await mount({
     history: [
       human(1, 'The old sentence.\n'),
       ai(2, 'The new sentence.\n', 'rewrite it', {
+        note: 'I dropped the heading you asked me not to add; the rewrite is below.',
         warnings: ['stripped: 1 heading'],
         stripped: { heading: 1 },
       }),
@@ -276,34 +372,55 @@ test('model speech and model edits are separate records — the UI never blends 
   try {
     const turn = view.findAll('.turn')[0];
     const speech = turn.querySelector('.turn-speech');
+    const reported = turn.querySelector('.turn-reported');
     const changes = turn.querySelector('.turn-changes');
-    assert.ok(speech && changes);
+    assert.ok(speech && reported && changes, 'all three records are present');
 
-    // Disjoint subtrees, not merely adjacent text. This is the assertion that stops
-    // a future conversation channel from being dropped into the diff paragraph.
-    assert.equal(speech.contains(changes), false, 'the diff must not live inside the report');
-    assert.equal(changes.contains(speech), false, 'the report must not live inside the diff');
+    // Pairwise disjoint subtrees, not merely adjacent text. This is the assertion
+    // that stopped the note from being dropped into the warning box when speech
+    // arrived, and it is the one that stops candidates being dropped into the diff.
+    for (const [a, an, b, bn] of [
+      [speech, 'speech', changes, 'diff'],
+      [speech, 'speech', reported, 'report'],
+      [reported, 'report', changes, 'diff'],
+    ]) {
+      assert.equal(a.contains(b), false, `the ${bn} must not live inside the ${an}`);
+      assert.equal(b.contains(a), false, `the ${an} must not live inside the ${bn}`);
+    }
 
-    // And nothing leaks either way.
-    assert.doesNotMatch(changes.textContent, /stripped/, 'what the model SAID is not in the diff');
-    assert.doesNotMatch(speech.textContent, /new sentence/, 'what the model DID is not in the report');
-    assert.equal(speech.querySelectorAll('ins, del').length, 0, 'no diff marks inside the report');
+    // And nothing leaks in any direction.
+    assert.doesNotMatch(changes.textContent, /stripped/, 'what was REPORTED is not in the diff');
+    assert.doesNotMatch(changes.textContent, /I dropped the heading/, 'what the model SAID is not in the diff');
+    assert.doesNotMatch(speech.textContent, /new sentence/, 'what the model DID is not in the note');
+    assert.doesNotMatch(speech.textContent, /stripped/, 'and the report is not in the note either');
+    assert.doesNotMatch(reported.textContent, /I dropped the heading/, 'nor the note in the report');
+    assert.equal(speech.querySelectorAll('ins, del').length, 0, 'no diff marks inside the note');
+    assert.equal(reported.querySelectorAll('ins, del').length, 0, 'no diff marks inside the report');
 
     // Each region names itself, so the separation survives a reader who cannot see
-    // the border between the two boxes.
-    assert.match(speech.getAttribute('aria-label'), /reported/i);
+    // the borders between the three boxes.
+    assert.match(speech.getAttribute('aria-label'), /said/i);
+    assert.match(reported.getAttribute('aria-label'), /reported/i);
     assert.match(changes.getAttribute('aria-label'), /changed/i);
-    assert.equal(speech.querySelector('.record-label').textContent, 'Reported');
+    assert.equal(speech.querySelector('.record-label').textContent, 'Note');
+    assert.equal(reported.querySelector('.record-label').textContent, 'Reported');
     assert.equal(changes.querySelector('.record-label').textContent, 'Changed');
+
+    // The two treatments are different rules in the stylesheet, not one rule
+    // applied twice: the note is the panel's white surface, the report is the
+    // amber warning box. jsdom applies no CSS, so this is pinned against the text.
+    assert.match(rule('.turn-reported'), /dashed var\(--warn\)/);
+    assert.doesNotMatch(rule('.turn-speech'), /dashed/, 'speech does not wear the warning treatment');
   } finally {
     await view.unmount();
   }
 });
 
-test('a turn with no warnings has no report region at all', async () => {
+test('a turn with nothing to report and nothing said has neither region', async () => {
   const view = await mount();
   try {
-    assert.equal(view.findAll('.turn-speech').length, 0, 'nothing was reported, so nothing is shown');
+    assert.equal(view.findAll('.turn-reported').length, 0, 'nothing was reported, so nothing is shown');
+    assert.equal(view.findAll('.turn-speech').length, 0, 'and nothing was said, so no empty note box');
     assert.equal(view.findAll('.turn-changes').length, 3, 'but every turn still shows what it changed');
   } finally {
     await view.unmount();

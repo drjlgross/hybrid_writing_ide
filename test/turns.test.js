@@ -52,6 +52,72 @@ test('a turn has the §3 shape', () => {
   assert.deepEqual(warned.warnings, ['large-shrink guard fired']);
 });
 
+test('§0.7 an AI turn carries the model\'s note, and a human turn cannot', () => {
+  const { doc } = commitHumanTurn(emptyDoc(), 'first draft\n', { now: AT(1) });
+
+  const spoken = commitAiTurn(doc, {
+    draft: 'revised\n',
+    prompt: 'tighten it',
+    note: 'I read this as a copy edit rather than a reframe.',
+    segments: [{ id: 's1', took: 'a copy edit', kind: 'edit' }],
+    now: AT(2),
+  }).turn;
+
+  assert.deepEqual(
+    Object.keys(spoken).sort(),
+    ['author', 'note', 'prompt', 'segments', 'snapshot', 'timestamp', 'turn_id'],
+    '§3: note and segments join the AI turn record',
+  );
+  assert.equal(spoken.note, 'I read this as a copy edit rather than a reframe.');
+  assert.deepEqual(spoken.segments, [{ id: 's1', took: 'a copy edit', kind: 'edit' }]);
+
+  // §0.7 is about SPEECH, so the field is prose or it is nothing.
+  assert.throws(
+    () => commitAiTurn(doc, { draft: 'x\n', prompt: 'p', note: { text: 'not prose' }, now: AT(3) }),
+    /the model's prose/,
+  );
+
+  // An empty note is a fact — the model spoke and said nothing — and is stored as
+  // one rather than dropped, because a missing key is a different claim.
+  const silent = commitAiTurn(doc, { draft: 'x\n', prompt: 'p', note: '', now: AT(3) }).turn;
+  assert.equal(silent.note, '');
+  assert.ok('note' in silent);
+
+  // §3 gives note and segments to AI turns only.
+  const human = commitHumanTurn(doc, 'second draft\n', { now: AT(4) }).turn;
+  assert.ok(!('note' in human));
+  assert.ok(!('segments' in human));
+
+  // The segments are copied, not aliased: a caller mutating its own array after
+  // the commit must not reach into the ledger (§0.3 — nothing mutates a turn).
+  const segments = [{ id: 's1', took: 'a copy edit', kind: 'edit' }];
+  const committed = commitAiTurn(doc, { draft: 'y\n', prompt: 'p', note: 'n', segments, now: AT(5) }).turn;
+  segments[0].took = 'something else';
+  segments.push({ id: 's2', took: 'more', kind: 'edit' });
+  assert.deepEqual(committed.segments, [{ id: 's1', took: 'a copy edit', kind: 'edit' }]);
+});
+
+test('§0.9 a speech-only turn commits, with a snapshot equal to the one before it', async () => {
+  // The degenerate case, at the turn-model layer: zero revision, and the unchanged
+  // snapshot is a positive assertion that the model touched nothing.
+  let doc = emptyDoc();
+  ({ doc } = commitHumanTurn(doc, 'The biology is the reason.\n', { now: AT(1) }));
+
+  const before = doc.history.length;
+  const { doc: after, turn } = commitAiTurn(doc, {
+    draft: doc.draft,
+    prompt: 'weigh in on the change I just made',
+    note: 'You moved the claim to the front. That is the right order.',
+    now: AT(2),
+  });
+
+  assert.equal(after.history.length, before + 1, '§3: a speech-only turn is NOT an empty turn');
+  assert.equal(turn.snapshot, doc.history[0].snapshot, 'the snapshot carries the prior text unchanged');
+  assert.equal(after.draft, doc.draft, 'and the working draft did not move');
+  assert.match(turn.note, /right order/);
+  assert.equal(turn.prompt, 'weigh in on the change I just made');
+});
+
 test('turn ids are sequential from 1 and the draft follows the last turn', () => {
   let doc = emptyDoc();
   ({ doc } = commitHumanTurn(doc, 'one\n', { now: AT(1) }));
