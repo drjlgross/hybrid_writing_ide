@@ -10,7 +10,8 @@
     "dev": "vite",
     "build": "vite build",
     "new-token": "node scripts/new-token.js",
-    "live-check": "node scripts/live-check.js"
+    "live-check": "node scripts/live-check.js",
+    "budget": "node scripts/live-check.js --budget"
   },
   "dependencies": {
     "@tiptap/core": "^3.29.0",

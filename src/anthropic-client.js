@@ -98,20 +98,31 @@ The object:
   "segments": [
     {"id": "s1", "took": "what you read this part of her message to be asking", "kind": "edit"}
   ],
-  "draft": "the complete revised draft as Markdown, or null if you are proposing no revision"
+  "draft": null
 }
 
 "kind" is one of "edit", "question", "context", "reframe".
 
+"draft" IS NULL UNLESS YOU ARE CHANGING THE TEXT. This is the single most important
+thing about the shape. Null is the common case, not the exception, and it is shown as
+the default above for that reason.
+
+The test is mechanical: if you are not making a specific change to specific words,
+"draft" is null. A question you answered is null. An opinion, an assessment, a
+disagreement, a description of what you WOULD change if asked — all null. If your note
+says "I would tighten this" rather than tightening it, that turn is null.
+
+Reproducing the draft you were given, unchanged or nearly so, is the one thing never to
+do. It is not a safe default. It costs her a long wait for a turn that changed nothing,
+and it is indistinguishable in the record from a revision you meant.
+
+When you ARE changing the text, "draft" is the complete revised draft as Markdown —
+the whole thing, not a fragment and not a description of an edit.
+
 "note" is where you speak to her, and it is the only place you speak. Everything you
 would have written as prose goes in here. It is never the draft: do not paste the
 revised text into it, quote long passages of the draft back to her, or narrate the
-changes she can already see.
-
-"draft" is null whenever you are proposing no change to the text, and you should reach
-for null often. A turn that answers a question and leaves the draft alone is a good
-turn, not a failure. When you do write a draft, write the WHOLE draft — not a fragment,
-and not a description of an edit.`;
+changes she can already see.`;
 
 /**
  * The response-format constraint (§2.2 enforcement).
@@ -171,7 +182,8 @@ export function buildUserMessage({ draft, prompt, humanEditDiff }) {
   // enforcement that survives if the format constraint is ever turned off.
   sections.push(
     'Reply with the JSON object and nothing else — "note" always, "segments" for how ' +
-      'you read the message, "draft" only if you are proposing a revision.',
+      'you read the message, and "draft" null unless you are changing the text. If you ' +
+      'are not editing specific words, "draft" is null; do not reproduce the draft above.',
   );
 
   return sections.join('\n\n---\n\n');

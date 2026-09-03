@@ -375,14 +375,21 @@ export function validateAiResponse(body, { draft, prompt }) {
 
   const previous = canonicalize(draft);
 
-  // 5. The revision, which is OPTIONAL (§0.7: "every AI turn returns a note. A
-  //    revision is optional."). A response with no `draft` field is the §0.9
-  //    speech-only turn: the snapshot carries the prior text unchanged, which is
-  //    a positive assertion that the model touched nothing.
+  // 5. The revision. §2.2 (amended, chunk 11a): `draft` is REQUIRED and NULLABLE,
+  //    and `null` is how the model says it is proposing no revision — the §0.9
+  //    speech-only turn, whose snapshot carries the prior text unchanged as a
+  //    positive assertion that the model touched nothing.
   //
-  //    §2.2's interim contract names a `draft` field; §0.7 is the locked decision
-  //    and it says a revision is optional, so absent-or-null is speech-only rather
-  //    than a contract violation. Reported as a finding.
+  //    Required-but-nullable, rather than optional, keeps the anti-forgetting
+  //    property: the model must DECLARE no-edit, and cannot arrive at one by
+  //    omitting a key. `RESPONSE_SCHEMA` enforces the presence on the request
+  //    side, so an absent `draft` should not reach here at all.
+  //
+  //    An absent `draft` is nonetheless accepted, and read the same way as null.
+  //    That is deliberate leniency, not a second spelling of the contract: the
+  //    schema is what asks for the field, and a parser that ALSO refused the
+  //    absent case would turn a request-side regression into a lost turn — with
+  //    the draft the only casualty and the model's speech thrown away with it.
   const proposed = envelope.draft;
   if (proposed === undefined || proposed === null) {
     if (speech.note === '') {

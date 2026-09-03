@@ -427,6 +427,131 @@ test('a turn with nothing to report and nothing said has neither region', async 
   }
 });
 
+// ── §4: wholesale replacement renders as blocks, not confetti ──────────────────
+
+/**
+ * The real failure, from the ledger. Turn 10 → 11 of the first live session
+ * replaced a trailing paragraph; old and new shared "a", "is", "." and "-", so
+ * the word diff stitched ten alternating delete/add pairs through the new prose.
+ * Trimmed here to the shape that reproduces it.
+ */
+const BEFORE_11 =
+  'Co-writing with a human and an AI combines the best of both worlds, and the paragraph runs on ' +
+  'for a while so that it is long enough to be a real anchor in the diff.\n\n' +
+  "[link](https://www.nytimes.com/) this is now a link test. Here's a copy-pasted link: " +
+  '<https://www.wsj.com/> link 2.\n';
+const AFTER_11 =
+  'Co-writing with a human and an AI combines the best of both worlds, and the paragraph runs on ' +
+  'for a while so that it is long enough to be a real anchor in the diff.\n\n' +
+  'I think the future is humans and AI working together more fluently. This is meant to be a tool ' +
+  'that facilitates that collaboration. I think there are at least two important kinds of edits.\n';
+
+test('§4 a wholesale replacement renders as a deletion block then an addition block', async () => {
+  const view = await mount({ history: [human(1, BEFORE_11), human(2, AFTER_11)] });
+
+  try {
+    const newest = view.findAll('.turn')[0];
+    const replacement = newest.querySelector('.diff-replacement');
+    assert.ok(replacement, 'the replaced region is one block pair, not interleaved marks');
+
+    const was = replacement.querySelector('del');
+    const now = replacement.querySelector('ins');
+    assert.ok(was && now, 'both sides are present');
+    assert.ok(
+      replacement.innerHTML.indexOf('<del') < replacement.innerHTML.indexOf('<ins'),
+      '§4: the deletion block comes first, then the addition block',
+    );
+
+    // THE POINT: no confetti. The old text is in one run and the new text is in
+    // one run, rather than a dozen fragments alternating through each other.
+    assert.match(was.textContent, /nytimes\.com/);
+    assert.match(was.textContent, /link 2/, 'the whole removed passage is in ONE del');
+    assert.match(now.textContent, /I think the future is humans/);
+    assert.match(now.textContent, /two important kinds of edits/, 'and the whole new passage in ONE ins');
+
+    // Nothing is summarized: the two sides reconstruct the region exactly.
+    assert.equal(was.textContent.includes('I think the future'), false, 'no new text inside the deletion');
+    assert.equal(now.textContent.includes('nytimes.com'), false, 'no old text inside the addition');
+
+    // The untouched opening paragraph is NOT swept into the block.
+    assert.equal(newest.querySelectorAll('.diff-replacement').length, 1);
+    assert.match(newest.querySelector('.diff .same').textContent, /combines the best of both worlds/);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§4 the confetti this replaces is gone: no alternation through the new prose', async () => {
+  const view = await mount({ history: [human(1, BEFORE_11), human(2, AFTER_11)] });
+
+  try {
+    const diff = view.find('.diff');
+    // Before this change the pattern was =-+=-+=-+=-+=-+=-+=-+=-+=-+=+ — ten
+    // alternations. Count the transitions between del and ins across the whole
+    // diff; a clean replacement has exactly one.
+    const marks = [...diff.querySelectorAll('del, ins')].map((n) => n.tagName.toLowerCase());
+    let alternations = 0;
+    for (let i = 1; i < marks.length; i += 1) if (marks[i] !== marks[i - 1]) alternations += 1;
+
+    assert.ok(
+      alternations <= 1,
+      `a wholesale replacement must not alternate; got ${alternations} transitions across ${marks.join(',')}`,
+    );
+    assert.equal(marks.length, 2, 'exactly one del and one ins');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§4 a small edit still renders inline — blocks are for replacements only', async () => {
+  // The five hand edits of live turn 17 are the case word-level marks handle
+  // best. Two of them, verbatim in shape: a word swap inside an untouched
+  // sentence. Blocking these would be strictly worse than the bug being fixed.
+  const before =
+    'The result is often a more efficient and less isolating writing process, where ideas tends to be ' +
+    'tested and expanded in real time, and gaps in reasoning or clarity are caught sooner than before.\n';
+  const after = before.replace('tends to', 'can').replace('sooner', 'faster');
+
+  const view = await mount({ history: [human(1, before), human(2, after)] });
+
+  try {
+    const newest = view.findAll('.turn')[0];
+    assert.equal(newest.querySelectorAll('.diff-replacement').length, 0, 'no blocks for a word swap');
+    assert.equal(newest.querySelectorAll('del').length, 2, 'two inline deletions');
+    assert.equal(newest.querySelectorAll('ins').length, 2, 'two inline insertions');
+    assert.match(newest.querySelector('del').textContent, /tends to/);
+    assert.match(newest.querySelector('ins').textContent, /can/);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§4 a pure insertion is not blocked — there is no interleaving to fix', async () => {
+  const before = 'The opening paragraph stands here unchanged, and it is long enough to be an anchor.\n';
+  const after =
+    before +
+    '\nA whole new paragraph arrives below it, long enough to clear the block minimum several times ' +
+    'over, but it replaces nothing at all so there is nothing to stack it against.\n';
+
+  const view = await mount({ history: [human(1, before), human(2, after)] });
+
+  try {
+    const newest = view.findAll('.turn')[0];
+    assert.equal(newest.querySelectorAll('.diff-replacement').length, 0, 'an insertion has no deletion to pair with');
+    assert.equal(newest.querySelectorAll('ins').length, 1);
+    assert.equal(newest.querySelectorAll('del').length, 0);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('the replacement block is styled as a block, and the pair reads as one thing', () => {
+  // jsdom applies no stylesheet, so "renders as a block" is a claim about the CSS.
+  assert.match(rule('.diff-block'), /display: block/);
+  assert.match(rule('.diff-block'), /border-left/, 'the border is what pairs the two halves');
+  assert.match(rule('.diff-replacement'), /flex-direction: column/, 'stacked, so reading order is was-then-now');
+});
+
 // ── §4: the read-only turn view ─────────────────────────────────────────────────
 
 test('§4 clicking a turn opens the whole draft as of that turn, read-only', async () => {

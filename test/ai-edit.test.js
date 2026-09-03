@@ -387,7 +387,7 @@ test('§6: the payload carries the system prompt, the diff, the instruction, and
   assert.match(SYSTEM_PROMPT, /"draft"/);
   assert.doesNotMatch(SYSTEM_PROMPT, /"candidates"/, 'candidates are step 13, not this contract');
   assert.match(SYSTEM_PROMPT, /"note" is where you speak to her/, '§0.7');
-  assert.match(SYSTEM_PROMPT, /"draft" is null whenever you are proposing no change/, '§0.7: a revision is optional');
+  assert.match(SYSTEM_PROMPT, /"draft" IS NULL UNLESS YOU ARE CHANGING THE TEXT/, '§2.2 amended: null is the default');
   assert.match(SYSTEM_PROMPT, /never the draft: do not paste the\nrevised text into it/, '§12: the panel never restates the draft');
   assert.doesNotMatch(
     SYSTEM_PROMPT,

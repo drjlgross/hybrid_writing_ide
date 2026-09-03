@@ -54,6 +54,10 @@ const STYLESHEET = readFileSync(
   'utf8',
 );
 
+/** A rule body from the stylesheet, for the pins jsdom cannot check. */
+const rule = (selector) =>
+  new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{[^}]*\\}`).exec(STYLESHEET)?.[0] ?? '';
+
 /** A promise the test resolves by hand, so "in flight" is a real state. */
 function deferred() {
   let resolve;
@@ -1671,6 +1675,44 @@ test('§0.5 the capability disclosure is on the surface, not behind a click', as
   } finally {
     await view.unmount();
   }
+});
+
+test('§12 the rail is reachable at any scroll depth, and still overlays nothing', () => {
+  // F65. jsdom applies no stylesheet and has no layout, so the two rules that
+  // make this true are pinned against the source; the behaviour itself is
+  // verified in a real browser and recorded in reports/chunk-11a.md.
+  const railRule = /(?<!\})\n\.rail \{([^}]*)\}/.exec(STYLESHEET)[1];
+
+  // `position: sticky` only holds an element inside its own containing block,
+  // which for a grid item is its grid area. Without spanning every row, the
+  // rail's area ended where the editor ended and the panel scrolled away as
+  // soon as the history got long. This is the fix.
+  assert.match(railRule, /position: sticky/);
+  assert.match(railRule, /grid-row: 1 \/ -1/, 'the containing block must span the whole workspace');
+
+  // A sticky element taller than the viewport pins its TOP, leaving Submit
+  // unreachable at every scroll position. The cap plus internal scrolling is
+  // what makes every control in the column reachable, not just the first screen.
+  assert.match(railRule, /max-height: calc\(100vh/);
+  assert.match(railRule, /overflow-y: auto/);
+
+  // It stays in column 2. The chunk-08 bug was the history spanning 1 / -1 and
+  // sliding UNDER the sticky rail because they shared columns; these two are
+  // pinned to different columns so spanning rows cannot make them overlap.
+  assert.match(railRule, /grid-column: 2/);
+  assert.match(rule('.history'), /grid-column: 1/);
+
+  // §12 forbids anything overlaying the draft. Sticky is not fixed, and the rail
+  // must not have become an overlay while nobody was looking.
+  assert.doesNotMatch(railRule, /position: fixed/);
+  assert.doesNotMatch(railRule, /z-index/);
+
+  // Below the breakpoint the rail is a band under the draft, not a column beside
+  // it, and every one of the rules above is wrong there.
+  const narrow = /@media \(max-width: 60rem\) \{\s*\n\s*\.rail \{([^}]*)\}/.exec(STYLESHEET);
+  assert.ok(narrow, 'the stacked layout must unset the sticky column rules');
+  assert.match(narrow[1], /position: static/);
+  assert.match(narrow[1], /max-height: none/);
 });
 
 test('§12 lilac is checked for contrast against the cream ground, not eyeballed', () => {

@@ -5,3 +5,4 @@ documents/
 .tmp-test/
 .env
 client/dist/
+.spend.json

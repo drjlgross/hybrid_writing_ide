@@ -266,12 +266,55 @@ body {
 
 /* ── the right column: three boxes, same paper treatment (§12) ───────────── */
 
+/* §12: Prompt and Model Response remain reachable at ANY scroll depth.
+ *
+ * Two rules do that, and both are needed:
+ *
+ * `grid-row: 1 / -1` is the fix for the bug. `position: sticky` only holds an
+ * element inside its own containing block, which for a grid item is its grid
+ * area. The history sits in row 2 of column 1, so the rail's row-1 area ended
+ * where the editor ended — and reading a long history scrolled the whole panel
+ * away, leaving no way to act without scrolling back up. Spanning every row
+ * makes the containing block the full workspace, which is what sticky needs.
+ *
+ * `max-height` + `overflow-y` is the other half. A sticky element taller than
+ * the viewport pins its TOP, so its bottom — Submit, in this rail — is
+ * unreachable at every scroll position. Capping it to the viewport and letting
+ * the rail scroll internally is what keeps every control in the column
+ * reachable rather than only the first screenful of them.
+ *
+ * This is NOT the chunk-08 bug in reverse. That was the history spanning
+ * `1 / -1` and sliding UNDER the sticky rail, because both were in the same
+ * columns. These two are in different columns — the rail is column 2, the
+ * history is pinned to column 1 — so spanning rows cannot make them overlap.
+ * The browser test asserts exactly that. */
 .rail {
   display: flex;
   flex-direction: column;
   gap: 1rem;
   position: sticky;
   top: 1.5rem;
+  grid-column: 2;
+  grid-row: 1 / -1;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  /* The scrollbar sits inside the column rather than over the boxes' right
+     edge, so a scrolling rail is not a rail with a stripe through it. */
+  scrollbar-gutter: stable;
+}
+
+/* Below the breakpoint the rail is no longer a column beside the draft — it is a
+   band under it, and everything above is wrong there: sticky would pin a
+   full-width block over the editor, and a viewport cap would put a scrollbar
+   inside a page that already scrolls. */
+@media (max-width: 60rem) {
+  .rail {
+    position: static;
+    grid-column: 1;
+    grid-row: auto;
+    max-height: none;
+    overflow-y: visible;
+  }
 }
 
 /* Prompt, Model Response, Standing Rules. One treatment, applied three times —
@@ -740,6 +783,30 @@ body {
 .diff-empty {
   color: var(--muted);
   font-style: italic;
+}
+
+/* §4: a wholesale replacement renders as a deletion block above an addition
+   block, not as word-level marks stitched through the new prose. `src/diff.js`
+   decides which regions qualify and why; this is only what they look like.
+
+   Stacked, not side by side: the rail leaves the history about 62rem, and two
+   columns of prose at that width are two columns of nothing. Reading order is
+   also the point — what it was, then what it became. */
+.diff-replacement {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+
+/* A block, so it stops behaving like a run of words inside a paragraph. The
+   left border is what makes the pair read as one replacement rather than as two
+   unrelated marks that happen to be adjacent. */
+.diff-block {
+  display: block;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid currentColor;
+  border-radius: 0 3px 3px 0;
 }
 
 /* §4: insertions green, deletions red strikethrough. The <ins>/<del> elements

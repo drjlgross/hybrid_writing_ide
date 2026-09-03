@@ -34,7 +34,7 @@
 
 import { useMemo, useState } from 'react';
 
-import { wordDiff } from '../../src/diff.js';
+import { groupDiffRegions, wordDiff } from '../../src/diff.js';
 import { h } from './h.js';
 
 /** `2026-08-21T03:45:05.000Z` → something a person can read, in their own zone. */
@@ -61,12 +61,46 @@ function readableTime(iso) {
  * — collapsing runs — is a rendering rule that can hide a change, which is the one
  * thing this view exists to prevent.
  */
-function diffElements(parts) {
+function inlineElements(parts, keyPrefix = 'p') {
   return parts.map((part, index) => {
-    const key = `p${index}`;
+    const key = `${keyPrefix}${index}`;
     if (part.added) return h('ins', { key, className: 'ins' }, part.value);
     if (part.removed) return h('del', { key, className: 'del' }, part.value);
     return h('span', { key, className: 'same' }, part.value);
+  });
+}
+
+/**
+ * The diff, region by region (§4).
+ *
+ * A region whose changed fraction is over the threshold renders as a DELETION
+ * BLOCK followed by an ADDITION BLOCK rather than as interleaved word-level
+ * marks. `groupDiffRegions` decides which; this only renders the decision.
+ *
+ * The failure it fixes is in the ledger. Turn 10 → 11 of the first live session
+ * replaced a trailing paragraph, and because old and new shared "a", "is", "."
+ * and "-", the word diff stitched ten alternating delete/add pairs through the
+ * new prose. The data was right and the rendering was unreadable.
+ *
+ * Nothing is summarized: a replacement region's two strings reconstruct that
+ * region's before-text and after-text exactly, so this changes how a change is
+ * shown and never whether it is shown.
+ */
+function diffElements(regions) {
+  return regions.map((region, index) => {
+    const key = `r${index}`;
+    if (region.type === 'inline') return inlineElements(region.parts, `${key}-`);
+
+    return h('div', { key, className: 'diff-replacement' }, [
+      // An empty side is skipped rather than rendered as an empty box: a region
+      // only blocks when it has both, but the markup should not depend on that.
+      region.removed === ''
+        ? null
+        : h('del', { key: 'was', className: 'del diff-block' }, region.removed),
+      region.added === ''
+        ? null
+        : h('ins', { key: 'now', className: 'ins diff-block' }, region.added),
+    ]);
   });
 }
 
@@ -83,6 +117,9 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
   // snapshot pair, so opening a turn or re-rendering the panel does not re-diff.
   const parts = useMemo(() => wordDiff(previous, turn.snapshot), [previous, turn.snapshot]);
   const changed = parts.some((part) => part.added || part.removed);
+  // Grouped separately from the diff itself so the memo keys stay honest: the
+  // regions are a pure function of the parts, and the parts of the snapshot pair.
+  const regions = useMemo(() => groupDiffRegions(parts), [parts]);
   // §0.9's degenerate case: an AI turn that spoke and touched no text.
   const isSpeechOnly = isAi && !changed && typeof turn.note === 'string' && turn.note !== '';
 
@@ -185,7 +222,9 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
     [
       h('span', { key: 'k', className: 'record-label' }, 'Changed'),
       changed
-        ? h('p', { key: 'diff', className: 'diff' }, diffElements(parts))
+        // A <div>, not a <p>: a replacement region renders block-level children,
+        // and a <p> may not contain them.
+        ? h('div', { key: 'diff', className: 'diff' }, diffElements(regions))
         : h(
             'p',
             { key: 'nochange', className: `diff diff-empty${isAi ? ' diff-unchanged' : ''}` },

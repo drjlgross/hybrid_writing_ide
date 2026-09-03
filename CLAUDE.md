@@ -70,6 +70,55 @@ the npm cache outside this tree. That is the only permitted exception.
 If a step seems to require touching anything outside the project root, stop and
 say so rather than doing it.
 
+### Live API spend (standing budget)
+
+The dev key in `.env` is available for development without asking. Trying things
+against the real model at low cost is the point of it, and requesting permission
+per call defeats that — the first live turn of chunk 11 broke the §2.2 contract in
+a way no fixture had caught, and the fix took two attempts because checking was
+expensive in round trips rather than in money.
+
+**The ceiling is $1.00 per budget window. Under it, spend without asking. At it,
+stop.**
+
+**A window opens at a commit and closes at the next one.** Ratifying a chunk
+starts a fresh $1 automatically — the ledger is anchored to the commit it was
+spent under, and a moved HEAD opens a new window at zero. So this is a RUNAWAY
+DETECTOR, not a lifetime cap: it catches a process spending in a loop and
+interrupts it near the source, and it does not ration the project's development
+budget. Reaching the ceiling inside one window is itself the signal, and the
+report says so, because "the project is out of budget" would send the reader
+looking for the wrong problem.
+
+Stopping means: abort **before** the call that would cross, and report
+
+- what has been spent so far in this window, against the ceiling,
+- what the refused call would have cost,
+- what the rest of that turn's live work would cost if continued.
+
+Then wait. Continuing *without* committing means raising `BUDGET_USD` in
+`scripts/spend-guard.js` or clearing the ledger with `rm .spend.json` — both the
+human's calls, not the assistant's. Do not do either unilaterally, and do not
+route around the guard by writing a script that calls the API directly.
+
+The window is read from `.git/HEAD` and the ref it names, on the filesystem.
+Nothing here shells out to `git`, per the operating rule above; a budget guard is
+the last place to start making exceptions to it. When HEAD cannot be read the
+window never auto-closes, which is the safe direction — spend keeps accumulating
+rather than silently resetting.
+
+`scripts/spend-guard.js` enforces this. Every script that spends the dev key
+routes through it; `npm run budget` reports where things stand — spend this
+window, the commit it is anchored to, and what the previous window cost — without
+spending anything. It is a guardrail and not a vault — it counts what goes through it, and
+the ledger is a file that can be deleted — so this rule is the control and the
+code is what makes the rule hard to forget.
+
+Nothing in `src/` may import it. The app's model caller runs in the deployed
+server, where a development budget would be nonsense: the server must not stop
+working because a dev ledger says $1. That separation is asserted in
+`test/spend-guard.test.js`.
+
 ### Headless browser (test-only)
 
 Playwright is an approved test-only devDependency. It exists for one thing:
@@ -536,6 +585,26 @@ revised Markdown, which commits as an AI turn exactly as today. `candidates` arr
 with chunk 12 and `draft` is removed in the same chunk. Build the interim shape so it
 is a field swap, not a rewrite.
 
+**`draft` is REQUIRED and NULLABLE.** Amended 2026-09-03, resolving F66.
+
+`"draft": null` means speech-only: no edit is proposed, and the ledger records an
+unchanged snapshot exactly as it does today (§0.9). A string means a revision, and it
+is the complete draft.
+
+Required-but-nullable rather than optional, deliberately, and the distinction is the
+whole point. **The model must DECLARE no-edit; it cannot arrive at one by omitting a
+key.** An absent field is a decision it can make by forgetting; `null` is one it has to
+make. That property is what the request-side schema is for, and it must survive the
+swap to `candidates` — an empty `candidates` array is the same declaration.
+
+What the amendment ends is full-draft regeneration on speech-only turns. With `draft`
+merely optional the model filled it with the draft it had just been given, so a turn
+that changed nothing cost a whole draft of output tokens and the human waited for it.
+The instruction that carries this is not a footnote in the prompt: null is the common
+case and the prompt has to say so, or the model treats reproducing the draft as the
+safe default. The cost is measurable and is measured — `scripts/live-check.js` prints
+output tokens per turn precisely so this claim stays a number.
+
 ### 2.3 Response safety (this is the one bug that loses work)
 
 *(All existing guards stand: `max_tokens` computed from draft size; `stop_reason`
@@ -632,6 +701,26 @@ and §0.9 together.
 - Each entry shows: turn number, author badge (Human / AI / Mixed), timestamp, the
   prompt string for AI turns, any warnings, and a rendered word-level diff (insertions
   green, deletions red strikethrough) against the previous turn's snapshot.
+
+  **Wholesale replacement renders as blocks, not as interleaved marks.** When the
+  changed fraction of a contiguous region exceeds a threshold, that region renders as
+  a deletion block followed by an addition block rather than word-level marks stitched
+  through the new prose. Added 2026-09-03, resolving F64.
+
+  A region ends at a run of unchanged text long enough to be a real shared passage;
+  punctuation and articles between two rewritten sentences are coincidence, not
+  common ground, and must not hold a region open. Blocking additionally requires that
+  the region contain *both* an insertion and a deletion — a pure insertion has no
+  interleaving to fix — and that enough text actually changed, so a two-word swap
+  inside an untouched sentence stays inline, which is the case word-level marks handle
+  best. The thresholds are implementation, named in the chunk report; the rule is that
+  all three conditions exist.
+
+  **This is a rendering rule and never a data rule.** A blocked region's two sides
+  carry every word of the before-text and the after-text; nothing is elided,
+  summarized, or collapsed. §4 exists so the view cannot hide a change, and a
+  replacement block shows *more* of the change than the confetti it replaces, not
+  less.
 - Clicking a turn opens the full draft as of that turn, read-only, selectable and
   copyable.
 
@@ -943,6 +1032,14 @@ rule that only the Model Response note wore a surface.
 3. **Standing Rules** — bullet list, blank by default, human-editable in place, model
    proposals appearing here per S11.
 
+**Prompt and Model Response remain reachable at any scroll depth.** The history view
+is the only scrollback (§4), so reading it is a normal thing to do at length — and the
+whole point of reading it is to then act. A panel that scrolls out of reach makes every
+turn cost a round trip back up the page. Mechanism is not specified; reachability is.
+Added 2026-09-03, resolving F65. Note the constraint this sits under: the rail must
+stay a column beside the draft, never an overlay, and the history stays in the editor's
+column, so nothing here may put one over the other.
+
 **§0.5's capability disclosure stays on the surface**, in the header, visible without
 a click — not inside the switcher drawer, and not inside any other drawer or menu.
 Resolves F51, 2026-09-03. §0.5 requires that a namespace "be described that way to
@@ -1015,6 +1112,22 @@ are not reused:
 Still open from chunk 10: **F48** (the `+` is in the layout but attaches nothing until
 step 12), **F50** (the history toggle lost its turn count), **F53** (which top-row
 controls are disabled mid-turn).
+
+Raised by live use after chunk 11 (commit 0adf03d), resolved in chunk 11a:
+
+- **F64 — the word-level diff renders wholesale replacement as confetti.** When a
+  human turn deletes a passage and writes new text sharing incidental words, the
+  word diff stitches strikethrough fragments through the new prose. Live turn
+  10 → 11 produced ten alternating delete/add pairs joined by `". "`, `" a "` and
+  `"-"`. The data is correct; the rendering is wrong for replacement-heavy changes.
+  **RESOLVED: §4's replacement-block rule, below.**
+- **F65 — the rail is unreachable at scroll depth.** Reading a long history meant
+  scrolling away from Prompt and Model Response, then scrolling back to act.
+  **RESOLVED: §12 now requires them reachable at any scroll depth.**
+- **F66 — speech-only turns pay full draft regeneration.** `draft` was optional and
+  the model filled it with the draft it had just been given, so a turn that changed
+  nothing cost a whole draft of output tokens and the wait that comes with it.
+  **RESOLVED: §2.2's amendment, `draft` required-but-nullable.**
 
 ---
 
