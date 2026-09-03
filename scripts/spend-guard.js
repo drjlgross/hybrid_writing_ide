@@ -172,9 +172,19 @@ export function readLedger(path = LEDGER_PATH, gitDir = GIT_DIR) {
   // HEAD moving for some other reason — a branch switch, an amend — also opens a
   // window. That is a false reset in principle and harmless in practice: a
   // runaway happens inside one working session, during which HEAD does not move.
+  //
+  // A MISSING anchor counts as "not this window" too, and that is not a detail.
+  // It is how a ledger written before anchoring existed gets retired: its spend
+  // belongs to some earlier, unidentifiable window, so carrying it into this one
+  // would charge a fresh chunk for work already ratified. Found by watching the
+  // first real commit after this guard shipped fail to reset.
+  //
+  // The `head &&` guard is what keeps that safe: with no readable HEAD there are
+  // no windows at all, so spend accumulates rather than resetting on every read.
+  // Without it, a checkout with no git directory would silently have no budget.
   const head = currentCommit(gitDir);
-  if (head && ledger.commit && ledger.commit !== head) {
-    return { ...fresh(head), previous: { total_usd: ledger.total_usd, commit: ledger.commit } };
+  if (head && ledger.commit !== head) {
+    return { ...fresh(head), previous: { total_usd: ledger.total_usd, commit: ledger.commit ?? null } };
   }
 
   return { ...ledger, commit: ledger.commit ?? head ?? null };

@@ -261,15 +261,33 @@ test('the refusal explains that a commit opens a fresh window', () => {
   assert.match(report, /spending in a loop/, 'and says what reaching it actually signals');
 });
 
-test('a ledger from before the window existed adopts the current commit', () => {
-  // Migration: the file written by the first version of this guard has no
-  // `commit` field. It must not read as "anchored to nothing" and reset forever.
+test('an un-anchored ledger is retired, not carried into the current window', () => {
+  // Migration, and a bug caught by watching the first real commit after this
+  // guard shipped fail to reset. A file written before anchoring existed has no
+  // `commit` field, so it belongs to some earlier window — carrying its spend
+  // forward would charge a fresh chunk for work already ratified.
   const path = freshLedger();
   const git = fakeGit('a'.repeat(40));
   writeFileSync(path, JSON.stringify({ total_usd: 0.0442, calls: [{ label: 'old' }] }));
 
   const ledger = readLedger(path, git.dir);
-  assert.equal(ledger.total_usd, 0.0442, 'the spend survives');
-  assert.equal(ledger.commit, 'a'.repeat(40), 'and adopts HEAD as its anchor');
-  assert.ok(!ledger.previous, 'which is not a reset');
+  assert.equal(ledger.total_usd, 0, 'the earlier window is closed');
+  assert.equal(ledger.commit, 'a'.repeat(40), 'and this one is anchored to HEAD');
+  assert.equal(ledger.previous.total_usd, 0.0442, 'with the retired total still reported');
+});
+
+test('with no readable HEAD there are no windows, so spend accumulates', () => {
+  // The other half of the rule above, and the dangerous one to get wrong: if a
+  // missing anchor always reset, a checkout with no git directory would reset on
+  // every read and effectively have no budget at all.
+  const path = freshLedger();
+  const noGit = join(tmpdir(), 'definitely-not-a-git-dir');
+
+  recordSpend({ model: 'claude-sonnet-5', usage: { input_tokens: 10_000, output_tokens: 10_000 }, path, gitDir: noGit });
+  recordSpend({ model: 'claude-sonnet-5', usage: { input_tokens: 10_000, output_tokens: 10_000 }, path, gitDir: noGit });
+
+  const ledger = readLedger(path, noGit);
+  assert.equal(ledger.calls.length, 2, 'both calls counted');
+  assert.ok(ledger.total_usd > 0.2, 'and the total kept climbing');
+  assert.ok(!ledger.previous, 'nothing was retired, because nothing closed a window');
 });
