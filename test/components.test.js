@@ -20,7 +20,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { App } from '../client/src/App.js';
-import { AiPanel } from '../client/src/AiPanel.js';
+import { PromptBox } from '../client/src/PromptBox.js';
+import { saveJson } from '../client/src/transcript.js';
 import { Toolbar } from '../client/src/Toolbar.js';
 import { h } from '../client/src/h.js';
 import { LINK_OPTIONS } from '../src/tiptap-config.js';
@@ -37,6 +38,19 @@ import { render } from './helpers/render.js';
  * mutation-checking the empty-state work in chunk 7.
  */
 const count = (view, selector) => view.findAll(selector).length;
+
+/**
+ * The stylesheet as TEXT.
+ *
+ * jsdom applies no stylesheet, so anything that is only true once CSS has been
+ * applied — the two-ends layout of the prompt box's action row, the contrast of
+ * lilac against the cream ground — has to be asserted against the source. A
+ * rendered assertion would pass with every one of those rules deleted.
+ */
+const STYLESHEET = readFileSync(
+  fileURLToPath(new URL('../client/src/styles.css', import.meta.url)),
+  'utf8',
+);
 
 /** A promise the test resolves by hand, so "in flight" is a real state. */
 function deferred() {
@@ -56,15 +70,17 @@ const okTurn = (draft, overrides = {}) => ({
 });
 
 /** Mount the app with a stub API and a real TipTap editor in jsdom. */
-async function mountApp({ draft = 'The stored draft.\n', api = {}, slug = 'draft', navigate } = {}) {
+async function mountApp({ draft = 'The stored draft.\n', api = {}, slug = 'draft', navigate, saveFile } = {}) {
   let editorInstance = null;
   const wentTo = [];
+  const saved = [];
 
   const view = await render(
     h(App, {
       token: '0'.repeat(32),
       slug,
       navigate: navigate ?? ((href) => wentTo.push(href)),
+      saveFile: saveFile ?? ((filename, data) => saved.push({ filename, data })),
       createApi: () => ({
         list: async () => ({ documents: [{ slug: 'draft', turns: 1, updated_at: null }] }),
         create: async (wanted) => ({ slug: wanted, draft: '', history: [] }),
@@ -91,7 +107,7 @@ async function mountApp({ draft = 'The stored draft.\n', api = {}, slug = 'draft
   );
 
   await view.flush();
-  return { ...view, editor: () => editorInstance, wentTo };
+  return { ...view, editor: () => editorInstance, wentTo, saved };
 }
 
 /** The 404 an unknown slug produces, in the shape ApiError gives the session. */
@@ -110,7 +126,7 @@ test('§0.2 submitting a prompt puts the editor into a visibly read-only state',
 
     await view.type(view.find('textarea'), 'tighten it');
 
-    await view.click(view.findByText('button', 'Send to the model'));
+    await view.click(view.findByText('button', 'Submit'));
 
     // The request has not resolved. Everything below is what the human sees now.
     assert.ok(view.find('.lock-veil'), 'the read-only state must be visible on the draft itself');
@@ -121,7 +137,7 @@ test('§0.2 submitting a prompt puts the editor into a visibly read-only state',
 
     // Every control that could start a competing turn is disabled.
     assert.equal(view.find('textarea').disabled, true);
-    assert.equal(view.findByText('button', 'Checkpoint').disabled, true);
+    assert.equal(view.find('.checkpoint').disabled, true);
     assert.equal(view.findByText('button', 'Working…').disabled, true);
     for (const button of view.findAll('.toolbar .tool')) {
       assert.equal(button.disabled, true, `toolbar button ${button.title} must be disabled`);
@@ -155,7 +171,7 @@ test('§0.2 a failed turn unlocks the editor and says the draft survived', async
   try {
     await view.type(view.find('textarea'), 'expand it');
 
-    await view.click(view.findByText('button', 'Send to the model'));
+    await view.click(view.findByText('button', 'Submit'));
     await view.flush();
 
     assert.equal(count(view, '.lock-veil'), 0, 'the editor unlocks');
@@ -199,7 +215,7 @@ test('a committed AI turn replaces what is on screen', async () => {
 
   try {
     await view.type(view.find('textarea'), 'rewrite it');
-    await view.click(view.findByText('button', 'Send to the model'));
+    await view.click(view.findByText('button', 'Submit'));
     await view.flush();
 
     assert.equal(serializeEditorMarkdown(view.editor()), 'After the turn, entirely rewritten.\n');
@@ -212,13 +228,13 @@ test('a committed AI turn replaces what is on screen', async () => {
 test('the send button is dead until an instruction is typed', async () => {
   const view = await mountApp();
   try {
-    assert.equal(view.findByText('button', 'Send to the model').disabled, true);
+    assert.equal(view.findByText('button', 'Submit').disabled, true);
 
     await view.type(view.find('textarea'), '   ');
-    assert.equal(view.findByText('button', 'Send to the model').disabled, true, 'whitespace is not an instruction');
+    assert.equal(view.findByText('button', 'Submit').disabled, true, 'whitespace is not an instruction');
 
     await view.type(view.find('textarea'), 'make it warmer');
-    assert.equal(view.findByText('button', 'Send to the model').disabled, false);
+    assert.equal(view.findByText('button', 'Submit').disabled, false);
   } finally {
     await view.unmount();
   }
@@ -232,7 +248,7 @@ test('§4 Checkpoint with nothing changed reports exactly that', async () => {
   });
 
   try {
-    await view.click(view.findByText('button', 'Checkpoint'));
+    await view.click(view.find('.checkpoint'));
     await view.flush();
 
     assert.match(view.text(), /nothing to checkpoint/);
@@ -254,12 +270,16 @@ test('Checkpoint that made a turn names it, and the turn count moves', async () 
   });
 
   try {
-    assert.match(view.text(), /Turns1/, 'one turn before');
-    await view.click(view.findByText('button', 'Checkpoint'));
+    // §12 removed the turn-count row. The count the client holds now surfaces on
+    // Export transcript, which is the control that acts on it.
+    const exported = () => view.findByText('button', 'Export transcript').getAttribute('title');
+    assert.match(exported(), /Save all 1 turn\b/, 'one turn before');
+
+    await view.click(view.find('.checkpoint'));
     await view.flush();
 
     assert.match(view.text(), /checkpointed as turn 2/);
-    assert.match(view.text(), /Turns2/, 'two turns after');
+    assert.match(exported(), /Save all 2 turns/, 'two turns after');
   } finally {
     await view.unmount();
   }
@@ -321,10 +341,7 @@ test('the empty-state styling is pinned in the stylesheet, not only in the marku
   // An assertion on the CSS TEXT, deliberately: jsdom applies no stylesheet, so a
   // rendered assertion here would pass with every one of these rules deleted.
   // Named as a text-level check in the chunk-07 report.
-  const css = readFileSync(
-    fileURLToPath(new URL('../client/src/styles.css', import.meta.url)),
-    'utf8',
-  );
+  const css = STYLESHEET;
   const editorRule = /\.editor \.tiptap \{[^}]*\}/.exec(css)?.[0] ?? '';
   assert.match(editorRule, /min-height:/, 'the empty editor needs a minimum height');
   assert.match(editorRule, /border: *1px solid/, 'and a visible border');
@@ -352,7 +369,7 @@ test('§2.3 warnings from a committed turn are shown, named, with counts', async
     stripped: { heading: 2, blockquote: 1, table: 1 },
   };
 
-  const view = await render(h(AiPanel, { state, onSubmit: async () => null, onCheckpoint: () => {} }));
+  const view = await render(h(PromptBox, { state, onSubmit: async () => null }));
   try {
     assert.ok(view.find('.status.warning'), 'a committed turn with warnings must show them');
     assert.match(view.text(), /stripped: 2 headings, 1 blockquote, 1 table/);
@@ -363,7 +380,7 @@ test('§2.3 warnings from a committed turn are shown, named, with counts', async
 });
 
 test('§2.3 a committed AI turn carries its warning and counts onto the screen', async () => {
-  // The other §2.3 test renders AiPanel from a hand-built state. This one goes
+  // The other §2.3 test renders PromptBox from a hand-built state. This one goes
   // through the whole client path — submit, commit, re-render — because the
   // question item 6 asks is whether the warning REACHES the screen, not whether
   // the panel can display one when handed it.
@@ -389,7 +406,7 @@ test('§2.3 a committed AI turn carries its warning and counts onto the screen',
 
   try {
     await view.type(view.find('textarea'), 'make it formal');
-    await view.click(view.findByText('button', 'Send to the model'));
+    await view.click(view.findByText('button', 'Submit'));
     await view.flush();
 
     const warning = view.find('.status.warning');
@@ -427,6 +444,11 @@ test('the documents in this namespace are listed, current one marked', async () 
   });
 
   try {
+    // §12: the Documents panel is gone. The list lives behind the document name in
+    // the top row, which is also the answer to "which document am I in".
+    assert.equal(count(view, '.doc-list'), 0, 'the switcher is closed until asked for');
+    await view.click(view.find('.doc-name'));
+
     const links = view.findAll('.doc a').map((a) => a.textContent);
     assert.deepEqual(links, ['draft', 'track-c-post']);
 
@@ -462,8 +484,8 @@ test('a document can be created, and creating another one goes there', async () 
 
   try {
     await view.click(view.findByText('button', '+ New document'));
-    await view.type(view.find('.library-form input'), 'Track C Post');
-    await view.click(view.findByText('.library-form button', 'Create'));
+    await view.type(view.find('.new-document-form input'), 'Track C Post');
+    await view.click(view.findByText('.new-document-form button', 'Create'));
     await view.flush();
 
     assert.deepEqual(created, ['Track C Post'], 'the raw name goes to the server, which sanitizes it');
@@ -504,8 +526,11 @@ test('§0.5 an address naming a document that is not there offers to create it',
     assert.match(view.text(), /my-esay/);
     assert.equal(count(view, '.status.error'), 0, 'nothing failed, so nothing is reported as failed');
 
-    // The documents that DO exist are still listed beside the offer.
+    // The documents that DO exist are still reachable from the top row's switcher,
+    // which survives the missing-slug screen because it is the way off it.
+    await view.click(view.find('.doc-name'));
     assert.deepEqual(view.findAll('.doc a').map((a) => a.textContent), ['draft']);
+    await view.click(view.find('.doc-name'));
 
     await view.click(view.findByText('button', 'Create my-esay'));
     await view.flush();
@@ -527,6 +552,7 @@ test('a failed listing does not masquerade as a failed draft', async () => {
 
   try {
     assert.equal(count(view, '.status.error'), 0, 'a broken list must not raise a draft error');
+    await view.click(view.find('.doc-name'));
     assert.match(view.text(), /No documents here yet/);
     assert.equal(
       serializeEditorMarkdown(view.editor()),
@@ -653,7 +679,7 @@ test('§4 the history is toggleable, and opening it never covers the draft', asy
   try {
     assert.equal(count(view, '.history'), 0, 'closed by default — the draft is what you came for');
 
-    await view.click(view.findByText('button', 'History (2 turns)'));
+    await view.click(view.findByText('button', 'Show history'));
 
     assert.ok(view.find('.history'), 'the timeline opens');
     assert.equal(view.findAll('.turn').length, 2);
@@ -704,8 +730,9 @@ test('§4 restore from the history puts the restored text in the editor and move
   });
 
   try {
-    assert.match(view.text(), /Turns2/, 'two turns before');
-    await view.click(view.findByText('button', 'History (2 turns)'));
+    const clientCount = () => view.findByText('button', 'Export transcript').getAttribute('title');
+    assert.match(clientCount(), /Save all 2 turns/, 'two turns before');
+    await view.click(view.findByText('button', 'Show history'));
 
     // One control per turn; the oldest entry is last, newest first.
     const buttons = view.findAll('.turn-restore');
@@ -729,7 +756,7 @@ test('§4 restore from the history puts the restored text in the editor and move
       restoredDraft,
       'the editor shows the restored content',
     );
-    assert.match(view.text(), /Turns3/, 'and the turn count moved — restore appended, it did not rewind');
+    assert.match(clientCount(), /Save all 3 turns/, 'and the turn count moved — restore appended, it did not rewind');
     assert.match(view.text(), /restored turn 1 as turn 3/);
     assert.equal(count(view, '.status.error'), 0);
     assert.equal(view.findAll('.turn').length, 3, 'the timeline shows the new turn too');
@@ -754,13 +781,17 @@ test('§4 restoring to the turn the draft already is reports honestly and mints 
   });
 
   try {
-    await view.click(view.findByText('button', 'History (2 turns)'));
+    await view.click(view.findByText('button', 'Show history'));
     await view.click(view.findAll('.turn-restore')[0]); // the live turn
     await view.flush();
 
     assert.match(view.text(), /nothing to restore/);
     assert.doesNotMatch(view.text(), /restored turn 2 as turn/);
-    assert.match(view.text(), /Turns2/, 'the count did not move');
+    assert.match(
+      view.findByText('button', 'Export transcript').getAttribute('title'),
+      /Save all 2 turns/,
+      'the count did not move',
+    );
     assert.equal(view.findAll('.turn').length, 2);
   } finally {
     await view.unmount();
@@ -778,7 +809,7 @@ test('§0.2 a restore in flight locks the draft, and says the reason is not the 
   });
 
   try {
-    await view.click(view.findByText('button', 'History (2 turns)'));
+    await view.click(view.findByText('button', 'Show history'));
     await view.click(view.findAll('.turn-restore')[1]);
 
     assert.ok(view.find('.lock-veil'), 'the draft is read-only while its content is being replaced');
@@ -814,7 +845,7 @@ test('§4 a turn opened from the history is text a human can copy out of', async
   });
 
   try {
-    await view.click(view.findByText('button', 'History (2 turns)'));
+    await view.click(view.findByText('button', 'Show history'));
     await view.click(view.findByText('button', 'Open turn 1 read-only'));
 
     const snapshot = view.find('.turn-snapshot pre');
@@ -875,32 +906,38 @@ test('the document list refreshes on every turn boundary, so its count cannot go
     },
   });
 
-  // Scoped to the SIDEBAR, not to the page: the history toggle and the panel both
-  // print turn counts of their own, and a page-wide regex passes on those while the
-  // library is still showing the number it was handed at page load. That is the exact
-  // bug this test is about, so the assertion has to look at the library alone.
-  const sidebarCount = () => view.find('.library .doc-meta').textContent;
-  const panelCount = () => view.find('.meta').textContent;
+  // Scoped to the SWITCHER, not to the page: the client keeps a turn count of its
+  // own and a page-wide regex passes on that while the listing is still showing the
+  // number it was handed at page load. That is the exact bug this test is about, so
+  // the assertion has to look at the server's listing alone.
+  //
+  // The switcher moved into the top row in step 10 (§12) but the staleness it
+  // guards against did not move with it: the listing is still fetched, still
+  // carries a per-document turn count, and still goes stale without a re-fetch.
+  const listedCount = () => view.find('.top-drawer .doc-meta').textContent;
+  // The client's own count, from `state.history`. The two must agree.
+  const clientCount = () => view.findByText('button', 'Export transcript').getAttribute('title');
 
   try {
-    assert.match(sidebarCount(), /^1 turn$/, 'the count at load');
+    await view.click(view.find('.doc-name'));
+    assert.match(listedCount(), /^1 turn$/, 'the count at load');
 
-    await view.click(view.findByText('button', 'Checkpoint'));
+    await view.click(view.find('.checkpoint'));
     await view.flush();
-    assert.match(sidebarCount(), /^2 turns$/, 'a checkpoint moved the sidebar');
-    assert.match(panelCount(), /Turns2/, 'and the panel agrees with it');
+    assert.match(listedCount(), /^2 turns$/, 'a checkpoint moved the listing');
+    assert.match(clientCount(), /Save all 2 turns/, 'and the client agrees with it');
 
     await view.type(view.find('textarea'), 'rewrite it');
-    await view.click(view.findByText('button', 'Send to the model'));
+    await view.click(view.findByText('button', 'Submit'));
     await view.flush();
-    assert.match(sidebarCount(), /^3 turns$/, 'an AI turn moved the sidebar');
-    assert.match(panelCount(), /Turns3/);
+    assert.match(listedCount(), /^3 turns$/, 'an AI turn moved the listing');
+    assert.match(clientCount(), /Save all 3 turns/);
 
-    await view.click(view.findByText('button', 'History (3 turns)'));
+    await view.click(view.findByText('button', 'Show history'));
     await view.click(view.findAll('.turn-restore')[2]);
     await view.flush();
-    assert.match(sidebarCount(), /^4 turns$/, 'a restore moved the sidebar');
-    assert.match(panelCount(), /Turns4/);
+    assert.match(listedCount(), /^4 turns$/, 'a restore moved the listing');
+    assert.match(clientCount(), /Save all 4 turns/);
 
     assert.equal(listCalls.length, 4, 'one listing at load, then one per turn boundary — no polling');
   } finally {
@@ -924,7 +961,7 @@ test('a commit that created no turn does not re-fetch the listing', async () => 
 
   try {
     assert.equal(listCalls, 1, 'the load');
-    await view.click(view.findByText('button', 'Checkpoint'));
+    await view.click(view.find('.checkpoint'));
     await view.flush();
     assert.match(view.text(), /nothing to checkpoint/);
     assert.equal(listCalls, 1, 'no turn, no boundary, no request');
@@ -1001,33 +1038,342 @@ test('a javascript: href never becomes a link, so opening one on click is not re
   }
 });
 
-test('the panel links to the stored document as raw JSON, in a new tab', async () => {
-  const view = await mountApp({ slug: 'draft' });
+// ── §12: the top row ────────────────────────────────────────────────────────────
+
+test('§12 the top row is the five named controls, in the spec\'s order, all lilac', async () => {
+  const view = await mountApp({ api: { load: async () => ({ draft: 'x\n', history: [{ turn_id: 1 }] }) } });
 
   try {
-    const raw = view.find('.raw-json');
-    assert.ok(raw, 'the stored file must be reachable from the UI');
+    const row = view.findAll('.top-row button');
+    assert.deepEqual(
+      row.map((b) => b.textContent.trim()),
+      ['Show history', 'draft', '+ New document', 'Export transcript', 'Checkpoint'],
+      'Show/hide history · document name · + New document · Export transcript · Checkpoint',
+    );
 
-    // The endpoint the app already loads from (§5). No new route.
-    assert.equal(raw.getAttribute('href'), `/api/t/${'0'.repeat(32)}/documents/draft`);
-    assert.equal(raw.getAttribute('target'), '_blank', 'never navigates the draft away');
-    assert.match(raw.getAttribute('rel') ?? '', /noopener/);
+    // §12: lilac = global and navigation controls, and the split is what a new
+    // control inherits from. A top-row button that is not lilac has left the split.
+    assert.ok(
+      row.every((b) => b.classList.contains('top-button')),
+      'every control in the top row wears the lilac treatment',
+    );
 
-    // Read-only by construction: it is a plain GET link, not a form or a button.
-    assert.equal(raw.tagName, 'A');
+    // Forest green is the primary action INSIDE a box, and nothing in the top row
+    // may wear it — that is the other half of the same rule.
+    assert.equal(count(view, '.top-row .submit'), 0);
   } finally {
     await view.unmount();
   }
 });
 
-test('the raw JSON link follows the slug it is looking at, and escapes it', async () => {
-  const view = await mountApp({ slug: 'track-c-post', api: { load: async () => ({ draft: 'x\n', history: [] }) } });
+test('§12 the document name opens the switcher and closes it again', async () => {
+  const view = await mountApp();
+
   try {
+    const name = view.find('.doc-name');
+    assert.equal(name.getAttribute('aria-expanded'), 'false');
+    assert.equal(count(view, '.top-drawer'), 0);
+
+    await view.click(name);
+    assert.equal(view.find('.doc-name').getAttribute('aria-expanded'), 'true');
+    assert.ok(view.find('.top-drawer .doc-list'), 'the documents in this namespace');
+
+    // §0.5's disclosure has to survive the removal of the old status row: anyone
+    // handed a capability link must be told what the link gives them.
+    assert.match(view.text(), /the link .*is.* the key/s);
+
+    await view.click(view.find('.doc-name'));
+    assert.equal(count(view, '.top-drawer'), 0, 'and it closes again');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§12 only one drawer is open at a time, and neither one overlays the draft', async () => {
+  const view = await mountApp();
+
+  try {
+    await view.click(view.find('.doc-name'));
+    await view.click(view.findByText('button', '+ New document'));
+
+    assert.equal(view.findAll('.top-drawer').length, 1, 'opening one closes the other');
+    assert.ok(view.find('.new-document-form'), 'and it is the one that was asked for');
+
+    // The drawer lives in the masthead, above the workspace. It cannot cover the
+    // editor because it is not in the same box as it.
+    assert.ok(view.find('.masthead .top-drawer'), 'the drawer is in the header');
+    assert.equal(count(view, '.workspace .top-drawer'), 0);
+    assert.ok(view.find('.editor .tiptap'), 'the editor is still mounted and on screen');
+    assert.equal(view.editor().isEditable, true, 'and still editable');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§12 Checkpoint carries the uncommitted-edits signal in the button itself', async () => {
+  // The status row that used to say "Uncommitted edits: yes" is gone (§12). If the
+  // button did not say it, nothing on screen would.
+  const view = await mountApp({ draft: 'Something to edit.\n' });
+
+  try {
+    let button = view.find('.checkpoint');
+    assert.equal(button.classList.contains('checkpoint-marked'), false, 'quiet when clean');
+    assert.equal(count(view, '.dirty-dot'), 0);
+    assert.equal(button.getAttribute('aria-label'), 'Checkpoint');
+
+    // A real hand edit through the real editor, which is what sets `dirty`.
+    await view.act(() => {
+      view.editor().commands.insertContentAt(1, 'Typed. ');
+    });
+    await view.flush();
+
+    button = view.find('.checkpoint');
+    assert.equal(button.classList.contains('checkpoint-marked'), true, 'marked when hand edits are unratified');
+    assert.equal(count(view, '.dirty-dot'), 1, 'the sighted half of the signal');
+    assert.match(
+      button.getAttribute('aria-label'),
+      /uncommitted hand edits/,
+      'and the half a screen reader can hear — a dot alone is not a fact',
+    );
+
+    await view.click(button);
+    await view.flush();
     assert.equal(
-      view.find('.raw-json').getAttribute('href'),
-      `/api/t/${'0'.repeat(32)}/documents/track-c-post`,
+      view.find('.checkpoint').classList.contains('checkpoint-marked'),
+      false,
+      'and it goes quiet once the edits are committed',
     );
   } finally {
     await view.unmount();
   }
+});
+
+// ── §4 / §12: Export transcript, which replaced the raw-JSON link ───────────────
+
+test('§4 Export transcript saves the whole ledger as JSON', async () => {
+  const view = await mountApp({
+    api: { load: async () => ({ draft: 'The draft.\n', history: LEDGER }) },
+  });
+
+  try {
+    await view.click(view.findByText('button', 'Export transcript'));
+
+    assert.equal(view.saved.length, 1, 'one file, from one click');
+    const { filename, data } = view.saved[0];
+    assert.equal(filename, 'draft-transcript.json', 'named for the document it came from');
+    assert.equal(data.slug, 'draft');
+    assert.match(data.exported_at, /^\d{4}-\d\d-\d\dT/, '§11 K4: when it was taken is part of the record');
+
+    // §0.4: full snapshots, every turn, verbatim. Not a summary and not a diff —
+    // diffs are computed from snapshots and never stored (§5).
+    assert.deepEqual(data.turns, LEDGER, 'the ledger as it stands, turn for turn');
+    assert.equal(data.turns[1].prompt, 'make it punchier', 'including the exact prompt string (§3)');
+    assert.ok(
+      data.turns.every((turn) => typeof turn.snapshot === 'string'),
+      'and the full snapshot on every turn',
+    );
+    assert.ok(!('diff' in data.turns[0]), 'no stored diff');
+
+    // It must survive JSON, since that is the file it becomes.
+    assert.deepEqual(JSON.parse(JSON.stringify(data)), data);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§4 a document with no turns has no transcript, and the control says so', async () => {
+  const view = await mountApp({ api: { load: async () => ({ draft: '', history: [] }) } });
+
+  try {
+    const button = view.findByText('button', 'Export transcript');
+    assert.equal(button.disabled, true, 'nothing to export');
+    assert.match(button.getAttribute('title'), /No turns yet/);
+
+    await view.click(button);
+    assert.equal(view.saved.length, 0, 'and a click writes no empty file');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('the raw-JSON link is gone: §12 removed the status row it lived in', async () => {
+  const view = await mountApp();
+
+  try {
+    assert.equal(count(view, '.raw-json'), 0);
+    assert.equal(count(view, '.meta'), 0, 'and the Document/Turns/Uncommitted row with it');
+    assert.equal(count(view, '.library'), 0, 'and the Documents panel');
+    assert.equal(count(view, '.panel'), 0);
+    assert.doesNotMatch(view.text(), /raw JSON/);
+    assert.doesNotMatch(view.text(), /Uncommitted edits/);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('saveJson hands the browser a named, downloadable JSON file, then lets it go', async () => {
+  // The wiring the App test stubs out. jsdom implements neither an object URL nor
+  // a download, so the four things saveJson touches are injected and watched.
+  const revoked = [];
+  const clicked = [];
+  let blobParts = null;
+
+  class FakeBlob {
+    constructor(parts, options) {
+      blobParts = parts;
+      this.type = options?.type;
+    }
+  }
+
+  const anchors = [];
+  const fakeDocument = {
+    body: { appendChild: (node) => anchors.push(node) },
+    createElement: () => ({
+      click() {
+        clicked.push({ href: this.href, download: this.download, attached: anchors.includes(this) });
+      },
+      remove() {},
+    }),
+  };
+
+  saveJson('t.json', { slug: 'draft', turns: [] }, {
+    document: fakeDocument,
+    Blob: FakeBlob,
+    URL: {
+      createObjectURL: () => 'blob:fake',
+      revokeObjectURL: (href) => revoked.push(href),
+    },
+  });
+
+  assert.equal(clicked.length, 1, 'exactly one download');
+  assert.equal(clicked[0].download, 't.json', 'with the filename asked for');
+  assert.equal(clicked[0].href, 'blob:fake');
+  assert.equal(clicked[0].attached, true, 'attached before the click — Firefox ignores a detached one');
+  assert.deepEqual(revoked, ['blob:fake'], 'and the blob is released, not left alive for the tab');
+  assert.deepEqual(JSON.parse(blobParts[0]), { slug: 'draft', turns: [] });
+});
+
+// ── §12: the right column ───────────────────────────────────────────────────────
+
+test('§12 the right column is three boxes, top to bottom, in the spec\'s order', async () => {
+  const view = await mountApp();
+
+  try {
+    const boxes = view.findAll('.rail .box');
+    assert.deepEqual(
+      boxes.map((box) => box.querySelector('h2').textContent),
+      ['Prompt', 'Model Response', 'Standing Rules'],
+    );
+    // §12: "same paper treatment". One class, three boxes — not three lookalike
+    // rules that can drift apart.
+    assert.equal(boxes.length, 3);
+    assert.equal(count(view, '.rail > *'), 3, 'and nothing else in the column');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§12 the two boxes this chunk leaves empty say what they are for', async () => {
+  // §4 requires that a speech-only turn "must not look like a rendering failure".
+  // A box that has never been filled at all is the same hazard.
+  const view = await mountApp();
+
+  try {
+    assert.match(view.find('.box-response').textContent, /nothing to say yet/);
+    assert.match(view.find('.box-rules').textContent, /none yet/);
+
+    // Empty means empty: no behaviour was built into either one this chunk.
+    assert.equal(count(view, '.box-response button'), 0);
+    assert.equal(count(view, '.box-rules button'), 0);
+    assert.equal(count(view, '.box-rules input'), 0);
+    assert.equal(count(view, '.box-rules li'), 0);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§12 the prompt box puts + bottom-left and Submit bottom-right, in forest green', async () => {
+  const view = await mountApp();
+
+  try {
+    const actions = view.findAll('.box-prompt .box-actions > button');
+    assert.deepEqual(actions.map((b) => b.textContent.trim()), ['+', 'Submit'], 'left to right');
+    assert.equal(actions[1].classList.contains('submit'), true, 'Submit wears the forest-green treatment');
+
+    // The `+` holds its §12 position and attaches nothing: context files are §8
+    // and arrive in step 12. It says so rather than failing silently on a click.
+    assert.equal(actions[0].disabled, true);
+    assert.match(actions[0].getAttribute('title'), /§8/);
+    assert.equal(count(view, '.box-prompt .chip'), 0, 'and no chips, because nothing can be attached yet');
+
+    // `justify-content: space-between` is what actually puts them at the two ends;
+    // jsdom applies no stylesheet, so the rule is pinned here. Extracted first, so
+    // a failure prints the rule rather than the whole stylesheet — the same shape
+    // as the empty-state check above, and for the same reason.
+    const actionsRule = /\.box-actions \{[^}]*\}/.exec(STYLESHEET)?.[0] ?? '';
+    assert.match(
+      actionsRule,
+      /justify-content: *space-between/,
+      'the two-ends layout is a real rule, not just DOM order',
+    );
+  } finally {
+    await view.unmount();
+  }
+});
+
+// ── §12: lilac, checked for contrast against the cream ground ───────────────────
+
+/** Relative luminance of a `#rrggbb`, per WCAG 2.x. */
+function luminance(hex) {
+  const channels = [1, 3, 5]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+/** WCAG contrast ratio between two `#rrggbb` colours. */
+function contrast(a, b) {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/** The value of a custom property declared on `:root` in the stylesheet. */
+function token(name) {
+  const match = STYLESHEET.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6});`, 'i'));
+  assert.ok(match, `--${name} must be declared in the stylesheet`);
+  return match[1];
+}
+
+test('§12 lilac is checked for contrast against the cream ground, not eyeballed', () => {
+  const paper = token('paper');
+  const ink = token('ink');
+  const lilac = token('lilac');
+  const edge = token('lilac-edge');
+  const deep = token('lilac-deep');
+
+  // The label on every top-row button. WCAG AA text.
+  assert.ok(
+    contrast(ink, lilac) >= 4.5,
+    `ink on lilac is ${contrast(ink, lilac).toFixed(2)}:1, below the 4.5:1 AA text minimum`,
+  );
+
+  // The fill alone does NOT separate the button from the page — this is the whole
+  // reason the border exists, and it is asserted so nobody "simplifies" it away.
+  assert.ok(
+    contrast(lilac, paper) < 3,
+    'if the lilac fill ever clears 3:1 against the paper on its own, the border is no longer load-bearing and this test should be revisited',
+  );
+  assert.ok(
+    contrast(edge, paper) >= 3,
+    `the button edge is ${contrast(edge, paper).toFixed(2)}:1 against the paper, below the 3:1 WCAG 1.4.11 minimum for a control boundary`,
+  );
+
+  // The dirty marker on Checkpoint, against the button it sits on.
+  assert.ok(
+    contrast(deep, lilac) >= 3,
+    `the dirty marker is ${contrast(deep, lilac).toFixed(2)}:1 on lilac, below 3:1`,
+  );
+
+  // Forest green keeps its half of the split.
+  assert.ok(contrast('#ffffff', token('accent')) >= 4.5, 'white on forest green');
 });

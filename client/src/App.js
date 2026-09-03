@@ -1,5 +1,6 @@
 /**
- * The editor and the AI side panel (CLAUDE.md §9 step 6).
+ * The §12 surface: a top row, the editor on the left, three boxes on the right,
+ * and the history below the editor.
  *
  * TipTap is a view; the Markdown string is authoritative (§0.6). This component
  * mounts the editor from `src/tiptap-config.js` — the SAME extension list the
@@ -9,6 +10,11 @@
  * The rules that can lose work do not live here. Locking, serialization timing and
  * turn reporting are all in draft-session.js, which is testable without a browser;
  * this component wires a real TipTap editor into it and renders the result.
+ *
+ * §12's division is the thing to preserve when editing this file: SPEECH LIVES IN
+ * THE PANEL, EDITS LIVE IN THE DRAFT. The right column never restates the draft,
+ * and nothing that proposes a change to the text is described in prose there
+ * instead of being shown in the editor.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -19,16 +25,19 @@ import { buildExtensions } from '../../src/tiptap-config.js';
 import { serializeEditorMarkdown } from '../../src/tiptap-serialize.js';
 import { createApi } from './api.js';
 import { createDraftSession, initialSessionState } from './draft-session.js';
-import { AiPanel } from './AiPanel.js';
 import { History } from './History.js';
-import { Library } from './Library.js';
+import { ModelResponse } from './ModelResponse.js';
+import { PromptBox } from './PromptBox.js';
+import { StandingRules } from './StandingRules.js';
 import { Toolbar } from './Toolbar.js';
+import { TopBar } from './TopBar.js';
+import { buildTranscript, saveJson, transcriptFilename } from './transcript.js';
 import { h } from './h.js';
 
 /**
  * @param {{token: string, slug: string, createApi?: Function, createEditor?: Function}} props
- *   The two factories are injected so the headless tests can supply a stub API and
- *   a jsdom-mounted editor. The app itself never passes them.
+ *   The factories are injected so the headless tests can supply a stub API, a
+ *   jsdom-mounted editor, and a fake file saver. The app itself never passes them.
  */
 export function App({
   token,
@@ -41,6 +50,9 @@ export function App({
   navigate = (href) => {
     globalThis.window.location.href = href;
   },
+  // §4's Export transcript. Injected for the same reason: jsdom implements
+  // neither an object URL nor a download.
+  saveFile = saveJson,
 }) {
   const mountRef = useRef(null);
   const sessionRef = useRef(null);
@@ -119,25 +131,41 @@ export function App({
     if (doc && doc.slug !== slug) navigate(documentAddress(token, doc.slug));
   }
 
-  const library = h(Library, {
-    key: 'library',
-    documents: state.documents,
+  /** §4: the full ledger as JSON. Read off the state; nothing is fetched. */
+  function exportTranscript() {
+    if (state.history.length === 0) return;
+    saveFile(transcriptFilename(state.slug ?? slug), buildTranscript(state.slug ?? slug, state.history));
+  }
+
+  const busy = state.pending !== null || state.locked;
+
+  // §12: the top row. Global and navigation controls, lilac, in the spec's order.
+  const topBar = h(TopBar, {
+    key: 'top',
     token,
     slug,
-    busy: state.pending !== null || state.locked,
+    documents: state.documents,
+    missing: state.missing,
+    dirty: state.dirty,
+    busy,
+    turns: state.history.length,
+    showHistory,
+    onToggleHistory: () => setShowHistory((was) => !was),
     onCreate: createDocument,
+    onExport: exportTranscript,
+    onCheckpoint: () => sessionRef.current.checkpoint(),
   });
 
   // §0.5: an address naming a slug that does not exist is not an error page. The
   // human was handed a link; the useful answer is "that one is not here yet,
-  // shall I make it" plus the documents that ARE here.
+  // shall I make it" plus, in the top row's switcher, the documents that ARE here.
   const missingPane = h('section', { key: 'missing', className: 'missing' }, [
     h('h2', { key: 'h' }, ['There is no document called ', h('code', { key: 'c' }, slug), ' yet.']),
     h(
       'p',
       { key: 'p' },
       'Nothing was lost — no document by that name has ever been created in this ' +
-        'namespace. You can create it now, or open one of the documents listed here.',
+        'namespace. You can create it now, or open one of the documents in the switcher above.',
     ),
     h(
       'button',
@@ -189,31 +217,7 @@ export function App({
   return h('div', { className: `app${state.locked ? ' locked' : ''}` }, [
     h('header', { key: 'masthead', className: 'masthead' }, [
       h('h1', { key: 'title' }, 'One draft, two hands'),
-      // §0.5: a capability token is not access control, and anyone handed a link
-      // has to be told what the link actually gives them.
-      h('p', { key: 'capability', className: 'capability' }, [
-        'Anyone with this link can read and edit every document in this namespace. There is no ',
-        'login — the link ',
-        h('em', { key: 'is' }, 'is'),
-        ' the key. Share it the way you would share a key.',
-      ]),
-      // §4's toggle. In the masthead rather than over the draft: opening the
-      // history must never cover the thing being written about.
-      state.missing
-        ? null
-        : h(
-            'button',
-            {
-              key: 'history-toggle',
-              type: 'button',
-              className: 'tool history-toggle',
-              'aria-expanded': showHistory,
-              onClick: () => setShowHistory((was) => !was),
-            },
-            showHistory
-              ? 'Hide history'
-              : `History (${state.history.length} turn${state.history.length === 1 ? '' : 's'})`,
-          ),
+      topBar,
     ]),
     h('main', { key: 'workspace', className: 'workspace' }, [
       // The missing-slug screen appears BESIDE the draft pane, which is merely
@@ -222,31 +226,30 @@ export function App({
       // editor into it (keyed on token+slug) does not re-run and tear it down.
       state.missing ? missingPane : null,
       draftPane,
-      h('div', { key: 'rail', className: 'rail' }, [
-        library,
-        state.missing
-          ? null
-          : h(AiPanel, {
-              key: 'panel',
+
+      // §12's right column: three boxes, same paper treatment, top to bottom.
+      // Two of them are empty in this chunk and say so; see their own files.
+      state.missing
+        ? null
+        : h('div', { key: 'rail', className: 'rail' }, [
+            h(PromptBox, {
+              key: 'prompt',
               state,
               onSubmit: (prompt) => sessionRef.current.submitPrompt(prompt),
-              onCheckpoint: () => sessionRef.current.checkpoint(),
-              // The document's own GET, the one the app loads from (§5). Built
-              // here because this is where the token lives; the panel never
-              // learns what a token is.
-              rawUrl: `/api/t/${token}/documents/${encodeURIComponent(slug)}`,
             }),
-      ]),
+            h(ModelResponse, { key: 'response' }),
+            h(StandingRules, { key: 'rules' }),
+          ]),
 
-      // §4: the timeline sits BELOW the draft and the rail, spanning the width. Not
-      // a modal and not an overlay — the draft stays on screen and stays editable
-      // while the history is open, which is what makes "copy a sentence out of turn
-      // 3 into the live draft" a thing a person can actually do.
+      // §4: the timeline sits BELOW the draft, in the editor's own column. Not a
+      // modal and not an overlay — the draft stays on screen and stays editable
+      // while the history is open, which is what makes "copy a sentence out of
+      // turn 3 into the live draft" a thing a person can actually do.
       showHistory && !state.missing
         ? h(History, {
             key: 'history',
             history: state.history,
-            busy: state.pending !== null || state.locked,
+            busy,
             onRestore: (turnId) => sessionRef.current.restoreTo(turnId),
           })
         : null,

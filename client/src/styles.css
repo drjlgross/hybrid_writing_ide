@@ -9,6 +9,28 @@
   --accent: #2f5d50;
   --warn: #8a5b12;
   --error: #8c2f2f;
+
+  /* §12's two button treatments, and nothing else. Lilac = global and
+     navigation controls (the top row); forest green = the primary action inside
+     a box (Submit). A new control inherits from that split rather than
+     accumulating a third treatment.
+
+     §12 asks for lilac to be checked for contrast against the cream ground
+     before shipping, so these three are pinned and asserted in
+     test/components.test.js rather than eyeballed:
+
+       ink on --lilac ............ 12.30:1  (WCAG AA text needs 4.5:1)
+       --lilac-edge on --paper ...  3.39:1  (WCAG 1.4.11 non-text needs 3:1)
+       --lilac-deep on --lilac ...  4.05:1  (the dirty marker, again non-text)
+
+     The fill alone is 1.37:1 against the paper — nowhere near enough to read as
+     a control on its own — which is why --lilac-edge exists and why every
+     lilac button is bordered rather than filled and left to float. */
+  --lilac: #ded5f0;
+  --lilac-hover: #cdbfe8;
+  --lilac-edge: #8f7fb8;
+  --lilac-deep: #6f5c9a;
+
   color-scheme: light;
 }
 
@@ -31,20 +53,106 @@ body {
 }
 
 .masthead {
-  padding: 1.25rem 2rem 0.75rem;
+  padding: 1.1rem 2rem 0.85rem;
   border-bottom: 1px solid var(--line);
 }
 
 .masthead h1 {
-  margin: 0;
+  margin: 0 0 0.7rem;
   font-size: 1.1rem;
   letter-spacing: 0.02em;
 }
 
+/* ── the top row (§12) ───────────────────────────────────────────────────── */
+
+/* Show/hide history · document name · + New document · Export transcript ·
+   Checkpoint. That order is the spec's. */
+.top-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.top-button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--lilac-edge);
+  border-radius: 4px;
+  background: var(--lilac);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.top-button:hover:not(:disabled) {
+  background: var(--lilac-hover);
+}
+
+.top-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.top-button-open {
+  background: var(--lilac-hover);
+  border-color: var(--lilac-deep);
+}
+
+/* The document name is a control, but it is also the answer to "which document
+   am I in" — the question the removed status row used to answer. */
+.doc-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* §12: Checkpoint carries the uncommitted-edits signal in the button itself.
+   The dot is the sighted half; the button's aria-label is the other half, and
+   neither is the only one, because a colour is not a fact a screen reader can
+   pass on. */
+.checkpoint-marked {
+  border-color: var(--lilac-deep);
+}
+
+.dirty-dot {
+  margin-left: 0.35rem;
+  color: var(--lilac-deep);
+  font-size: 1.1em;
+  line-height: 0;
+  vertical-align: middle;
+}
+
+/* The switcher and the new-document field PUSH THE PAGE DOWN rather than
+   floating over it. §12 wants nothing overlaying the draft, and an absolutely
+   positioned menu is the cheapest way to end up with something that does. */
+.top-drawer {
+  margin: 0.7rem 0 0;
+  padding: 0.7rem 0.85rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  max-width: 34rem;
+}
+
+.new-document-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.new-document-form input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+}
+
 .capability {
-  margin: 0.35rem 0 0;
-  font-size: 0.8rem;
-  color: var(--muted);
+  margin: 0.6rem 0 0;
   max-width: 62ch;
 }
 
@@ -135,7 +243,11 @@ body {
 }
 
 /* The §0.2 lock has to be visible. An editor that silently swallows keystrokes
-   reads as a broken app. */
+   reads as a broken app.
+
+   §12: an indicator in the panel, the editor locked, THE DRAFT FULLY VISIBLE.
+   This is a translucent wash inside the editor's own box, not a modal and not a
+   full-screen graphic — the text stays readable underneath it. */
 .lock-veil {
   position: absolute;
   inset: 0;
@@ -152,55 +264,89 @@ body {
   cursor: not-allowed;
 }
 
-/* ── the panel ───────────────────────────────────────────────────────────── */
+/* ── the right column: three boxes, same paper treatment (§12) ───────────── */
 
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 1rem 1.1rem 1.25rem;
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   position: sticky;
   top: 1.5rem;
 }
 
-.panel h2 {
-  margin: 0 0 0.75rem;
+/* Prompt, Model Response, Standing Rules. One treatment, applied three times —
+   §12 asks for the same paper on all three, so there is exactly one rule for it
+   and the boxes differ only in what they contain. */
+.box {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.85rem 1.1rem 1rem;
+}
+
+.box h2 {
+  margin: 0 0 0.6rem;
   font-size: 0.95rem;
 }
 
-.panel textarea {
+/* An empty box that says what it is for, rather than a blank one that reads as
+   a rendering failure (§4 makes the same demand of a speech-only turn). */
+.box-empty {
+  margin: 0;
+}
+
+.box textarea {
   width: 100%;
   font: inherit;
   font-size: 0.9rem;
   padding: 0.6rem;
   border: 1px solid var(--line);
   border-radius: 4px;
+  background: #fff;
   resize: vertical;
 }
 
-.panel-actions {
+/* §12: `+` bottom-left, Submit bottom-right. */
+.box-actions {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
   margin-top: 0.6rem;
 }
 
-.panel-actions button {
+.attach {
   font: inherit;
-  font-size: 0.85rem;
-  padding: 0.4rem 0.75rem;
+  font-size: 1rem;
+  line-height: 1;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: #fff;
   cursor: pointer;
 }
 
-.panel-actions .primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+.attach:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
-.panel-actions button:disabled {
+/* Forest green: the primary action inside a box, and the only thing that wears
+   this treatment (§12). */
+.submit {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.submit:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -268,25 +414,6 @@ body {
   }
 }
 
-.meta {
-  margin: 1.1rem 0 0;
-  border-top: 1px solid var(--line);
-  padding-top: 0.6rem;
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-
-.meta > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.meta dt,
-.meta dd {
-  margin: 0;
-}
-
 /* ── the empty draft ─────────────────────────────────────────────────────── */
 
 /* An empty editor and an editor that failed to mount both render as nothing.
@@ -307,60 +434,11 @@ body {
   user-select: none;
 }
 
-/* ── the document list ───────────────────────────────────────────────────── */
-
-.rail {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  position: sticky;
-  top: 1.5rem;
-}
-
-/* The panel already sticks on its own; inside the rail that would fight. */
-.rail .panel {
-  position: static;
-  top: auto;
-}
-
-.library {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0.85rem 1.1rem 1rem;
-}
-
-.library-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.library h2 {
-  margin: 0;
-  font-size: 0.95rem;
-}
-
-.library-form {
-  display: flex;
-  gap: 0.35rem;
-  margin-top: 0.6rem;
-}
-
-.library-form input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-}
+/* ── the document switcher, inside the top row's drawer ──────────────────── */
 
 .doc-list {
   list-style: none;
-  margin: 0.7rem 0 0;
+  margin: 0;
   padding: 0;
   font-size: 0.85rem;
 }
@@ -456,10 +534,6 @@ body {
 .history-head h2 {
   margin: 0;
   font-size: 1rem;
-}
-
-.history-toggle {
-  margin-top: 0.6rem;
 }
 
 .turn-list {
@@ -658,8 +732,4 @@ body {
   overflow-wrap: anywhere;
   /* Normal document scroll here too — see the note on .diff above. */
   user-select: text;
-}
-
-.raw-json {
-  color: var(--accent);
 }
