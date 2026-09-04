@@ -26,6 +26,7 @@ import {
   saveDocument,
 } from '../src/storage.js';
 import { commitHumanTurn, restoreToTurn, submitAiPrompt } from '../src/turns.js';
+import { formatReport, scanRepository } from './secret-scan.js';
 
 const SLUG = 'smoke';
 
@@ -97,9 +98,38 @@ const cannedResponse = (text, note) => ({ draft }) => {
   );
 };
 
-// ── the session ─────────────────────────────────────────────────────────────────
+// ── (0) secrets ─────────────────────────────────────────────────────────────────
+// Before anything else, because this is the check whose cost of being skipped is
+// unbounded. Everything below verifies that the provenance model still holds; a
+// committed credential is not a thing a later check can undo.
+//
+// It runs here rather than only at commit time so it is exercised on every
+// session-opening run, which is the difference between a scanner that works and
+// a scanner nobody has run since the day it was written.
 say('smoke-session — provenance model, driven directly against the store');
 say(`document: ${documentPath(SLUG, DIR)}`);
+step('0', 'scan staged and tracked content for key material (CLAUDE.md § Operating rules)');
+const secrets = scanRepository();
+// `ok`, not `findings.length`: a scan that COULD NOT RUN produces the same empty
+// findings as a scan that found nothing, and reporting the first as a pass would
+// be the failure this step exists to prevent.
+if (!secrets.ok) {
+  console.error(formatReport(secrets));
+  console.error(
+    secrets.findings.length > 0
+      ? '\nsmoke-session FAILED: key material found. Do not commit.\n'
+      : '\nsmoke-session FAILED: the secret scan could not run, so nothing is verified.\n',
+  );
+  process.exit(1);
+}
+check(
+  true,
+  `no key material in ${secrets.tracked.files} tracked and ${secrets.staged.files} staged file` +
+    `${secrets.staged.files === 1 ? '' : 's'}` +
+    `${secrets.tracked.binary ? `, ${secrets.tracked.binary} binary skipped` : ''}`,
+);
+
+// ── the session ─────────────────────────────────────────────────────────────────
 
 // (a) create a document with slug `smoke`
 step('a', 'create a document with slug "smoke"');

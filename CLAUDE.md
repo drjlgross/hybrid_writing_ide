@@ -40,7 +40,11 @@ Section 0 decisions are locked. If one seems wrong, say so and stop — do not c
 and do not write code that depends on changing it. Report the collision before the code
 exists, not as a finding afterward.
 
-Never run git. Commits are a human ratification step.
+Git commits and pushes happen only on the human's explicit instruction, never of
+the assistant's own accord — ratification is the human's act even when the
+assistant types the command. Before any commit: run `node scripts/secret-scan.js`
+and proceed only on exit 0. A hit means stop, show the finding, and wait;
+committing over a failed scan is never correct.
 
 Do not install runtime dependencies beyond the npm packages this spec names.
 
