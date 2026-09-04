@@ -66,6 +66,29 @@ export function resolveNamespace(token, { root = DOCUMENTS_ROOT } = {}) {
   return { dir: join(root, token) };
 }
 
+/**
+ * Token → the directory holding that namespace's context file CONTENT (§0.5,
+ * amended 2026-09-03).
+ *
+ * THROUGH THE SAME ONE FUNCTION, deliberately. `resolveNamespace` above is what
+ * §0.5 says must be the only place an identity becomes a place on disk, so the
+ * files directory is derived from its answer rather than being a second
+ * token→path mapping. When tokens become accounts, this still changes only
+ * because `resolveNamespace` did.
+ *
+ * Sibling to the documents rather than inside them: the document JSON holds
+ * metadata only, because it is read on every load and every listing and a
+ * base64 screenshot in that path costs megabytes per read.
+ *
+ * @param {string} token
+ * @param {{root?: string}} [options]
+ * @returns {{dir: string, filesDir: string}}
+ */
+export function resolveNamespaceFiles(token, { root = DOCUMENTS_ROOT } = {}) {
+  const namespace = resolveNamespace(token, { root });
+  return { ...namespace, filesDir: join(namespace.dir, 'files') };
+}
+
 /** The namespace local development uses (§0.5's fixed default token). */
 export function defaultNamespace({ root = DOCUMENTS_ROOT } = {}) {
   return resolveNamespace(DEFAULT_TOKEN, { root });

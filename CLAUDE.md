@@ -407,8 +407,22 @@ This is a decision, not an oversight. Do not "optimize" it into deltas.
 - Atomic writes: write to `documents/{slug}.json.tmp`, then rename. A crash mid-write
   must not lose the session.
 
-Context files (§8) and standing rules (§10) live inside the document's own JSON,
-inside the same namespace, and are subject to every rule above.
+Standing rules (§10) live inside the document's own JSON, inside the same
+namespace, and are subject to every rule above.
+
+**Context file CONTENT is stored as sibling files** under
+`documents/{token}/files/{id}`, resolved through the same single
+namespace-resolution function. Amended 2026-09-03, ratified — the earlier rule put
+context inside the document JSON, which for images meant base64 in the file that is
+read on every load and every listing, so a couple of screenshots put megabytes in
+the read path.
+
+The document JSON holds context **metadata only** — id, filename, description,
+type, extraction status — and remains the source of truth for what exists. A file
+on disk with no metadata entry is not context; deleting context deletes the file.
+No endpoint lists or reads across namespaces, unchanged.
+
+Export transcript carries context metadata, never file bytes (§4).
 
 ### 0.6 TipTap is a view, Markdown is authoritative
 Serialization happens at commit boundaries only, never per keystroke. The API key

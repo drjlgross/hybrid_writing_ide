@@ -35,11 +35,27 @@ import { SCHEMA_VERSION } from '../../src/schema.js';
  * @param {object[]} history the ledger, in order
  * @param {Date} [now]
  */
-export function buildTranscript(slug, history, now = new Date()) {
+export function buildTranscript(slug, history, now = new Date(), { context = [], rules = [] } = {}) {
   return {
     schema_version: SCHEMA_VERSION,
     slug,
     exported_at: now.toISOString(),
+    // §0.5 (amended): METADATA, never file bytes. A transcript is a record of the
+    // session, and a session that read three screenshots is described by naming
+    // them and what she said they were for — the pixels are not the record, and
+    // embedding them would put megabytes in a file whose whole value is that it
+    // is readable. `context_ref` on each turn says which were in scope when.
+    context: context.map(({ id, filename, type, kind, bytes, description, added_at, extraction }) => ({
+      id,
+      filename,
+      type,
+      kind,
+      bytes,
+      description,
+      added_at,
+      extraction,
+    })),
+    rules,
     turns: history,
   };
 }

@@ -60,7 +60,8 @@ Do not introduce headings, tables, or other Markdown constructs. Preserve existi
 links unless the instruction says otherwise.
 
 You will receive the current complete draft, optionally a diff showing the human's most
-recent hand edits, and her message.
+recent hand edits, any context files she has attached with her descriptions of them,
+any standing rules she has set, and her message.
 
 Treat the human's recent hand edits as deliberate. Do not revert them, smooth them, or
 rewrite them unless the message explicitly asks you to.
@@ -155,38 +156,124 @@ changes she can already see.`;
 export const OUTPUT_FORMAT = { type: 'json_schema', schema: RESPONSE_SCHEMA };
 
 /**
- * The user turn: the human-edit diff (if any), the instruction, then the draft
- * (§2.1, §6). The diff is labelled explicitly — it is the point of the app, and
- * the model cannot tell which lines are the human's without being told.
+ * How context is introduced to the model (§2.1 item 4, §8 C2).
  *
- * @param {{draft: string, prompt: string, humanEditDiff?: string|null}} input
+ * The DESCRIPTION comes first, then the content. §8 C2 is the reason: the same
+ * document can be a tone reference, source material, or a scaffold, and which one
+ * it is cannot be inferred from the file — so the model must be told what it is
+ * looking at before it looks, not after.
  */
-export function buildUserMessage({ draft, prompt, humanEditDiff }) {
-  const sections = [];
+function contextHeader(file) {
+  const described = file.description?.trim();
+  return (
+    `Context file: ${file.filename}\n` +
+    (described
+      ? `What she says it is: ${described}`
+      : 'She attached this without a description, so read it for what it is.')
+  );
+}
 
-  if (humanEditDiff) {
-    sections.push(
-      'These are the human\'s most recent hand edits, as a word-level diff of their ' +
-        'last turn. Treat them as deliberate — do not revert, smooth, or rewrite them ' +
-        'unless the message below explicitly asks you to.\n\n' +
-        humanEditDiff,
+/**
+ * The user turn as CONTENT BLOCKS (§2.1, §6).
+ *
+ * A block list rather than a string, because §8 C3 makes images first-class: an
+ * attached screenshot is an `image` block the model reads, not a filename it is
+ * told about. Text context stays inline as text blocks.
+ *
+ * ORDER IS THE ARGUMENT. Context first, then rules, then the hand-edit diff, then
+ * her message, then the draft, then the format reminder. Context and rules are
+ * setup — they are the same on every turn and belong where a cache prefix would
+ * want them — while the message and the draft are what changed. The diff sits
+ * before the message because §2.1 item 2 is the point of the app and the message
+ * is often *about* it.
+ *
+ * @param {{draft: string, prompt: string, humanEditDiff?: string|null,
+ *   context?: object[], rules?: string|null}} input
+ * @returns {object[]} Anthropic content blocks
+ */
+export function buildUserContent({ draft, prompt, humanEditDiff, context = [], rules = null }) {
+  const blocks = [];
+  const text = (value) => blocks.push({ type: 'text', text: value });
+
+  // ── §2.1 item 4: the context files, each with her description ──────────────
+  const usable = context.filter((entry) => !entry.error);
+  if (usable.length > 0) {
+    text(
+      `She has attached ${usable.length} context file${usable.length === 1 ? '' : 's'} to this ` +
+        'document. They are background for the work, not part of the draft — never copy them ' +
+        'into it unless she asks. Read them for what her descriptions say they are for.',
+    );
+
+    for (const entry of usable) {
+      text(contextHeader(entry.file));
+      if (entry.kind === 'image') {
+        // §8 C3: the model reads the image. This is the near-default case.
+        blocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: entry.type, data: entry.base64 },
+        });
+      } else {
+        text(`--- ${entry.file.filename} ---\n${entry.text}\n--- end ---`);
+      }
+    }
+  }
+
+  // A file that could not be read is named rather than omitted: the model should
+  // know she believes it attached something, so it can ask instead of guessing.
+  const broken = context.filter((entry) => entry.error);
+  if (broken.length > 0) {
+    text(
+      'These context files could not be read and were NOT sent:\n' +
+        broken.map((entry) => `- ${entry.error}`).join('\n'),
     );
   }
 
-  sections.push(`Her message:\n\n${prompt}`);
-  sections.push(`Current complete draft:\n\n${draft}`);
+  // ── §2.1 item 5: standing rules, with their scopes ─────────────────────────
+  if (rules) {
+    text(
+      'Standing rules she has set for this document. They hold for every turn until she ' +
+        'removes them, and they outrank your own preferences about the prose:\n\n' +
+        rules,
+    );
+  }
+
+  // ── §2.1 item 2: the hand-edit diff. The point of the app ──────────────────
+  if (humanEditDiff) {
+    text(
+      "These are the human's most recent hand edits, as a word-level diff of their " +
+        'last turn. Treat them as deliberate — do not revert, smooth, or rewrite them ' +
+        `unless the message below explicitly asks you to.\n\n${humanEditDiff}`,
+    );
+  }
+
+  text(`Her message:\n\n${prompt}`);
+  text(`Current complete draft:\n\n${draft}`);
 
   // The contract, restated last. The draft above it can run to thousands of words,
   // and the format instruction is otherwise the most distant thing in the request
   // from the point where generation starts. Cheap, and it is the half of the
   // enforcement that survives if the format constraint is ever turned off.
-  sections.push(
+  text(
     'Reply with the JSON object and nothing else — "note" always, "segments" for how ' +
       'you read the message, and "draft" null unless you are changing the text. If you ' +
       'are not editing specific words, "draft" is null; do not reproduce the draft above.',
   );
 
-  return sections.join('\n\n---\n\n');
+  return blocks;
+}
+
+/**
+ * The user turn as one string.
+ *
+ * Kept because it is what the tests and `live-check` read to assert ordering, and
+ * because a text-only turn has no reason to be a block list. `buildUserContent`
+ * is what actually goes on the wire.
+ */
+export function buildUserMessage(input) {
+  return buildUserContent(input)
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n\n---\n\n');
 }
 
 /**
@@ -216,7 +303,8 @@ export function createModelCaller({
     );
   }
 
-  return async function callModel({ draft, prompt, humanEditDiff }) {
+  return async function callModel({ draft, prompt, humanEditDiff, context, rules }) {
+    const content = buildUserContent({ draft, prompt, humanEditDiff, context, rules });
     let response;
     try {
       response = await fetchImpl(API_URL, {
@@ -231,7 +319,7 @@ export function createModelCaller({
           model,
           max_tokens: maxTokensForDraft(draft),
           system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: buildUserMessage({ draft, prompt, humanEditDiff }) }],
+          messages: [{ role: 'user', content }],
           // §2.2 enforcement. See OUTPUT_FORMAT.
           ...(structuredOutput ? { output_config: { format: OUTPUT_FORMAT } } : {}),
         }),

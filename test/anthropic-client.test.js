@@ -54,7 +54,11 @@ test('the request carries the model, version header, and a draft-sized max_token
   assert.equal(payload.max_tokens, maxTokensForDraft(draft));
   assert.ok(payload.max_tokens > 4096, 'a long draft must get a budget bigger than the floor');
   assert.equal(payload.messages[0].role, 'user');
-  assert.match(payload.messages[0].content, /tighten it/);
+  // Content is a BLOCK LIST since step 12: §8 C3 makes an attached image a real
+  // `image` block the model reads, so a plain string could not carry one.
+  assert.ok(Array.isArray(payload.messages[0].content));
+  const asText = payload.messages[0].content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+  assert.match(asText, /tighten it/);
 });
 
 // ── §2.2 enforcement: the structured-output constraint ─────────────────────────

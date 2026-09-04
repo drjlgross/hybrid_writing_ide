@@ -131,10 +131,42 @@ export function App({
     if (doc && doc.slug !== slug) navigate(documentAddress(token, doc.slug));
   }
 
+  /**
+   * §8 C1: read the file in the browser and hand the server its bytes.
+   *
+   * base64 on the wire, never on disk in that form — §0.5 (amended) stores the
+   * content as a sibling file under the namespace and keeps only metadata in the
+   * document JSON, so a listing never pays for a screenshot.
+   *
+   * `readAsDataURL` rather than a multipart upload: the API is JSON end to end
+   * and one encoding is cheaper to reason about than two.
+   */
+  async function attachContext(file, seededDescription) {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new globalThis.FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+      reader.onerror = () => reject(reader.error ?? new Error('could not read that file'));
+      reader.readAsDataURL(file);
+    });
+
+    return sessionRef.current?.attachContext({
+      filename: file.name,
+      type: file.type || 'text/plain',
+      description: seededDescription,
+      data,
+    });
+  }
+
   /** §4: the full ledger as JSON. Read off the state; nothing is fetched. */
   function exportTranscript() {
     if (state.history.length === 0) return;
-    saveFile(transcriptFilename(state.slug ?? slug), buildTranscript(state.slug ?? slug, state.history));
+    saveFile(
+      transcriptFilename(state.slug ?? slug),
+      buildTranscript(state.slug ?? slug, state.history, new Date(), {
+        context: state.context,
+        rules: state.rules,
+      }),
+    );
   }
 
   const busy = state.pending !== null || state.locked;
@@ -247,6 +279,12 @@ export function App({
               key: 'prompt',
               state,
               onSubmit: (prompt) => sessionRef.current.submitPrompt(prompt),
+              // §8. None of these commits a turn (§0.10) — they are a different
+              // code path from submitPrompt and carry a different busy flag.
+              onAttach: attachContext,
+              onDescribe: (id, description) => sessionRef.current.describeContext(id, description),
+              onRemove: (id) => sessionRef.current.removeContext(id),
+              onClearContext: () => sessionRef.current.clearContext(),
             }),
             h(ModelResponse, {
               key: 'response',
@@ -254,7 +292,13 @@ export function App({
               speechOnly: state.speechOnly,
               pending: state.pending === 'ai',
             }),
-            h(StandingRules, { key: 'rules' }),
+            h(StandingRules, {
+              key: 'rules',
+              state,
+              onAdd: (text) => sessionRef.current.addRule(text),
+              onUpdate: (id, patch) => sessionRef.current.updateRule(id, patch),
+              onRemove: (id) => sessionRef.current.removeRule(id),
+            }),
           ]),
 
       // §4: the timeline sits BELOW the draft, in the editor's own column. Not a

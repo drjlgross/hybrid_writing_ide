@@ -21,19 +21,56 @@
  * draft" is a fact the app observed about the turn, so it belongs here; the
  * model's account of WHY it changed nothing is speech, and belongs there.
  *
- * WHAT IS DELIBERATELY NOT HERE: the `+` attaches nothing yet. Context files are
- * §8 and arrive in step 12. The control occupies its §12 position, disabled and
- * saying why, so the box is the frame the next chunk builds into rather than a
- * layout that has to be rearranged to accept it.
+ * §8 lands here in step 12, resolving F48: the `+` attaches a real file, chips
+ * carry their editable descriptions, and both persist across submits so it is
+ * evident context was not consumed by the last turn (§12).
+ *
+ * TWO RULES FROM §0.10 SHAPE THE CONTROLS. Attaching or describing context never
+ * triggers a turn, so none of this goes near `onSubmit`. And the editor is not
+ * locked while a file uploads — `state.busyContext` is a different flag from
+ * `state.pending` for exactly that reason: treating "she gave me a file" as
+ * "she asked for an edit" is the failure §0.10 exists to prevent.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { h } from './h.js';
 
-export function PromptBox({ state, onSubmit }) {
+/**
+ * §8 C2a: the description is pre-populated from the prompt where she stated it
+ * inline, because that is how it actually arrives — "look to these for length and
+ * tone, not content". A blank field per file is a tax that will not be paid.
+ *
+ * Deliberately crude, and it should stay crude: it seeds an editable field, and
+ * being wrong costs her one edit. Anything cleverer would be inferring what the
+ * file IS, which §8 C2 says cannot be done from the file.
+ */
+export function seedDescription(prompt) {
+  const text = String(prompt ?? '').trim();
+  if (text === '') return '';
+
+  // The sentence that mentions the attachment is the one she wrote about it.
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const about = sentences.find((sentence) =>
+    /\b(attach|attached|attaching|here is|here's|these|this file|screenshot|look to|for (?:tone|colou?r|length|reference))\b/i.test(
+      sentence,
+    ),
+  );
+  return (about ?? sentences[0] ?? '').trim().slice(0, 200);
+}
+
+export function PromptBox({
+  state,
+  onSubmit,
+  onAttach = null,
+  onDescribe = null,
+  onRemove = null,
+  onClearContext = null,
+}) {
   const [prompt, setPrompt] = useState('');
+  const fileInput = useRef(null);
   const busy = state.pending !== null;
+  const context = state.context ?? [];
 
   async function submit(event) {
     event.preventDefault();
@@ -91,6 +128,65 @@ export function PromptBox({ state, onSubmit }) {
     );
   }
 
+  // ── §8: the chips ─────────────────────────────────────────────────────────
+  const chips =
+    context.length === 0
+      ? null
+      : h('div', { key: 'chips', className: 'chips' }, [
+          ...context.map((file) =>
+            h('div', { key: file.id, className: `chip chip-${file.kind}${file.extraction === 'failed' ? ' chip-failed' : ''}` }, [
+              h('div', { key: 'head', className: 'chip-head' }, [
+                h('span', { key: 'name', className: 'chip-name', title: `${file.type}, ${Math.ceil(file.bytes / 1024)}KB` }, file.filename),
+                h(
+                  'button',
+                  {
+                    key: 'x',
+                    type: 'button',
+                    className: 'chip-remove',
+                    'aria-label': `Remove ${file.filename}`,
+                    disabled: state.busyContext,
+                    onClick: () => onRemove?.(file.id),
+                  },
+                  '×',
+                ),
+              ]),
+
+              // §8 C3: extraction failure surfaces ON THE CHIP, never as a silent
+              // degradation to an unread attachment.
+              file.extraction === 'failed'
+                ? h('p', { key: 'bad', className: 'chip-error' }, `Could not read this: ${file.extraction_error}`)
+                : null,
+
+              // §8 C2: freeform, editable in place. Not a taxonomy, not a dropdown.
+              h('input', {
+                key: 'desc',
+                type: 'text',
+                className: 'chip-description',
+                value: file.description ?? '',
+                placeholder: 'what is it, and why is it here?',
+                'aria-label': `What ${file.filename} is for`,
+                disabled: state.busyContext,
+                onChange: (event) => onDescribe?.(file.id, event.target.value),
+              }),
+            ]),
+          ),
+
+          // §8 C5: wholesale discard, as a first-class operation rather than a
+          // session restart. Two of the three records the spec came from destroy
+          // context on purpose to get their best output.
+          h(
+            'button',
+            {
+              key: 'clear',
+              type: 'button',
+              className: 'chip-clear',
+              disabled: state.busyContext,
+              onClick: () => onClearContext?.(),
+            },
+            `Discard all ${context.length} context file${context.length === 1 ? '' : 's'}`,
+          ),
+        ]);
+
   return h('section', { className: 'box box-prompt' }, [
     h('h2', { key: 'h' }, 'Prompt'),
 
@@ -110,15 +206,30 @@ export function PromptBox({ state, onSubmit }) {
 
       // §12: `+` bottom-left, Submit bottom-right.
       h('div', { key: 'actions', className: 'box-actions' }, [
+        h('input', {
+          key: 'file',
+          ref: fileInput,
+          type: 'file',
+          className: 'attach-input',
+          hidden: true,
+          'aria-hidden': 'true',
+          tabIndex: -1,
+          onChange: async (event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (file && onAttach) await onAttach(file, seedDescription(prompt));
+          },
+        }),
         h(
           'button',
           {
             key: 'attach',
             type: 'button',
             className: 'attach',
-            disabled: true,
-            'aria-label': 'Attach a file (not yet built)',
-            title: 'Attaching context files arrives with §8. Nothing is attached yet.',
+            disabled: state.busyContext || !onAttach,
+            'aria-label': 'Attach a context file',
+            title: 'Attach a text file or an image as context for this document (§8).',
+            onClick: () => fileInput.current?.click(),
           },
           '+',
         ),
@@ -137,6 +248,7 @@ export function PromptBox({ state, onSubmit }) {
       h('p', { key: 'hint', className: 'hint' }, '⌘/Ctrl + Enter submits.'),
     ]),
 
+    chips,
     ...status,
   ]);
 }

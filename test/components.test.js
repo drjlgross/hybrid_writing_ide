@@ -21,7 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 import { App } from '../client/src/App.js';
 import { ModelResponse } from '../client/src/ModelResponse.js';
-import { PromptBox } from '../client/src/PromptBox.js';
+import { PromptBox, seedDescription } from '../client/src/PromptBox.js';
+import { StandingRules } from '../client/src/StandingRules.js';
 import { buildTranscript, saveJson } from '../client/src/transcript.js';
 import { Toolbar } from '../client/src/Toolbar.js';
 import { h } from '../client/src/h.js';
@@ -1165,7 +1166,7 @@ test('§4 Export transcript saves the whole ledger as JSON', async () => {
     assert.equal(filename, 'draft-transcript.json', 'named for the document it came from');
     assert.deepEqual(
       Object.keys(data),
-      ['schema_version', 'slug', 'exported_at', 'turns'],
+      ['schema_version', 'slug', 'exported_at', 'context', 'rules', 'turns'],
       '§4 pins the wrapper shape, and nothing else may join it silently',
     );
     assert.equal(data.schema_version, SCHEMA_VERSION, 'the SAME constant the store writes');
@@ -1327,10 +1328,10 @@ test('§12 a box with nothing in it yet says what it is for', async () => {
     assert.match(view.find('.box-response').textContent, /nothing to say yet/, 'before any turn has spoken');
     assert.match(view.find('.box-rules').textContent, /none yet/);
 
-    // Standing Rules is still empty by design: §10's human-written half is step 12.
-    assert.equal(count(view, '.box-rules button'), 0);
-    assert.equal(count(view, '.box-rules input'), 0);
-    assert.equal(count(view, '.box-rules li'), 0);
+    // §10's human-written half is built (step 12), so the box has an add form —
+    // but no RULES until she writes one, which is what the empty state is about.
+    assert.equal(count(view, '.box-rules li'), 0, 'no rules yet');
+    assert.ok(view.find('.rule-add input'), 'and a way to write the first one');
   } finally {
     await view.unmount();
   }
@@ -1344,11 +1345,12 @@ test('§12 the prompt box puts + bottom-left and Submit bottom-right, in forest 
     assert.deepEqual(actions.map((b) => b.textContent.trim()), ['+', 'Submit'], 'left to right');
     assert.equal(actions[1].classList.contains('submit'), true, 'Submit wears the forest-green treatment');
 
-    // The `+` holds its §12 position and attaches nothing: context files are §8
-    // and arrive in step 12. It says so rather than failing silently on a click.
-    assert.equal(actions[0].disabled, true);
+    // F48, resolved in step 12: the `+` attaches a real file. It keeps its §12
+    // position; what changed is that it now does something.
+    assert.equal(actions[0].disabled, false, 'the + is live');
     assert.match(actions[0].getAttribute('title'), /§8/);
-    assert.equal(count(view, '.box-prompt .chip'), 0, 'and no chips, because nothing can be attached yet');
+    assert.ok(view.find('.box-prompt input[type="file"]'), 'and opens a file picker');
+    assert.equal(count(view, '.box-prompt .chip'), 0, 'no chips until something is attached');
 
     // `justify-content: space-between` is what actually puts them at the two ends;
     // jsdom applies no stylesheet, so the rule is pinned here. Extracted first, so
@@ -1713,6 +1715,231 @@ test('§12 the rail is reachable at any scroll depth, and still overlays nothing
   assert.ok(narrow, 'the stacked layout must unset the sticky column rules');
   assert.match(narrow[1], /position: static/);
   assert.match(narrow[1], /max-height: none/);
+});
+
+// ── §8: context chips ──────────────────────────────────────────────────────────
+
+/** A state object shaped like the session's, with context attached. */
+const withContext = (context, extra = {}) => ({
+  slug: 'draft',
+  history: [{ turn_id: 1 }],
+  pending: null,
+  locked: false,
+  dirty: false,
+  error: null,
+  notice: null,
+  warnings: [],
+  stripped: null,
+  note: null,
+  speechOnly: false,
+  busyContext: false,
+  rules: [],
+  context,
+  ...extra,
+});
+
+test('§8 an attached file shows as a chip with its editable description', async () => {
+  const described = [];
+  const view = await render(
+    h(PromptBox, {
+      state: withContext([
+        { id: 'a1', filename: 'tone-reference.md', type: 'text/markdown', kind: 'text', bytes: 419, description: 'house style — tone, not content', extraction: 'ok' },
+      ]),
+      onSubmit: async () => null,
+      onDescribe: (id, description) => described.push([id, description]),
+    }),
+  );
+
+  try {
+    const chip = view.find('.chip');
+    assert.ok(chip, 'the file is on screen');
+    assert.match(chip.textContent, /tone-reference\.md/);
+    assert.ok(chip.classList.contains('chip-text'));
+
+    // §8 C2: freeform and editable IN PLACE, not a dropdown and not read-only.
+    const description = chip.querySelector('.chip-description');
+    assert.equal(description.value, 'house style — tone, not content');
+    await view.type(description, 'actually: source material');
+    assert.deepEqual(described.at(-1), ['a1', 'actually: source material']);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§8 C3 extraction failure surfaces ON THE CHIP', async () => {
+  // §8 is explicit: extraction failure is never a silent degradation to an unread
+  // attachment. The file is kept — she may still want it — and the chip says so.
+  const view = await render(
+    h(PromptBox, {
+      state: withContext([
+        { id: 'b1', filename: 'truncated.png', type: 'image/png', kind: 'image', bytes: 900, description: '', extraction: 'failed', extraction_error: 'the bytes are not a valid PNG' },
+      ]),
+      onSubmit: async () => null,
+    }),
+  );
+
+  try {
+    const chip = view.find('.chip');
+    assert.ok(chip.classList.contains('chip-failed'));
+    assert.match(chip.querySelector('.chip-error').textContent, /not a valid PNG/);
+    assert.match(chip.textContent, /truncated\.png/, 'and the file is still listed');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§8 C5 discard is available individually AND wholesale', async () => {
+  const removed = [];
+  let cleared = 0;
+  const view = await render(
+    h(PromptBox, {
+      state: withContext([
+        { id: 'a1', filename: 'one.md', type: 'text/markdown', kind: 'text', bytes: 10, description: '', extraction: 'ok' },
+        { id: 'a2', filename: 'two.png', type: 'image/png', kind: 'image', bytes: 20, description: '', extraction: 'ok' },
+      ]),
+      onSubmit: async () => null,
+      onRemove: (id) => removed.push(id),
+      onClearContext: () => { cleared += 1; },
+    }),
+  );
+
+  try {
+    assert.equal(view.findAll('.chip').length, 2);
+    await view.click(view.findAll('.chip-remove')[0]);
+    assert.deepEqual(removed, ['a1'], 'one at a time');
+
+    // Wholesale is a FIRST-CLASS operation, not a hidden one: two of the three
+    // records the spec came from destroy context on purpose.
+    const clear = view.find('.chip-clear');
+    assert.match(clear.textContent, /Discard all 2 context files/);
+    await view.click(clear);
+    assert.equal(cleared, 1);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§8 C2a the description is seeded from the prompt where she said it inline', () => {
+  assert.match(
+    seedDescription('Look to these for length and tone, not content. Tighten the second paragraph.'),
+    /^Look to these for length and tone, not content\.$/,
+  );
+  assert.match(
+    seedDescription("For color, here's what they said in the thread. Work it in."),
+    /For color, here's what they said/,
+  );
+  assert.match(seedDescription('Attached is the style guide.'), /Attached is the style guide/);
+
+  // No inline statement: the first sentence is the best available guess, and being
+  // wrong costs her one edit. A blank field is the thing to avoid (§8 C2a).
+  assert.equal(seedDescription(''), '');
+  assert.match(seedDescription('Tighten the second paragraph.'), /Tighten the second paragraph/);
+});
+
+test('§0.10 the editor stays live while context is being written', async () => {
+  // `busyContext` is a different flag from `pending` on purpose. Locking the
+  // editor because a screenshot is uploading would be §0.10's failure in
+  // miniature: treating "she gave me a file" as "she asked for an edit".
+  const view = await mountApp();
+  try {
+    assert.equal(view.editor().isEditable, true);
+    assert.equal(count(view, '.lock-veil'), 0, 'no read-only veil for a context write');
+  } finally {
+    await view.unmount();
+  }
+});
+
+// ── §10: the Standing Rules box ────────────────────────────────────────────────
+
+test('§10 rules render as an editable list, individually revocable', async () => {
+  const removed = [];
+  const updated = [];
+  const view = await render(
+    h(StandingRules, {
+      state: {
+        busyContext: false,
+        rules: [
+          { id: 'r1', text: 'no em-dashes', scope: 'this document', source: 'human' },
+          { id: 'r2', text: 'open on the biology, not the pipeline', scope: 'openings', source: 'human' },
+        ],
+      },
+      onRemove: (id) => removed.push(id),
+      onUpdate: (id, patch) => updated.push([id, patch]),
+    }),
+  );
+
+  try {
+    assert.equal(view.findAll('.rule').length, 2);
+    // The text lives in an input's value, not its textContent — it is editable in
+    // place, which is the point.
+    assert.deepEqual(
+      view.findAll('.rule-text').map((input) => input.value),
+      ['no em-dashes', 'open on the biology, not the pipeline'],
+    );
+
+    // Editable in place: a rule you cannot edit is one you delete and retype.
+    await view.type(view.findAll('.rule-text')[0], 'no em-dashes anywhere');
+    assert.deepEqual(updated.at(-1), ['r1', { text: 'no em-dashes anywhere' }]);
+
+    await view.click(view.findAll('.rule-remove')[1]);
+    assert.deepEqual(removed, ['r2'], 'individually revocable');
+
+    // Said out loud, because §0.10's separation is invisible unless stated.
+    assert.match(view.text(), /Editing them never runs one/);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§10 a rule can be added, and the field clears only on success', async () => {
+  const added = [];
+  let succeed = false;
+  const view = await render(
+    h(StandingRules, {
+      state: { busyContext: false, rules: [] },
+      onAdd: (text) => { added.push(text); return succeed; },
+    }),
+  );
+
+  try {
+    const field = view.find('.rule-add input');
+    await view.type(field, 'no em-dashes');
+    await view.click(view.find('.rule-submit'));
+    assert.deepEqual(added, ['no em-dashes']);
+    assert.equal(view.find('.rule-add input').value, 'no em-dashes', 'a failed write keeps what she typed');
+
+    succeed = true;
+    await view.click(view.find('.rule-submit'));
+    assert.equal(view.find('.rule-add input').value, '', 'and a successful one clears it');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§10 step 16 is an addition: a proposed rule needs no second list', async () => {
+  // The store carries `source` already, so a model-proposed rule renders in the
+  // same list with its own treatment. This is what "an addition, not a migration"
+  // has to mean at the UI layer too.
+  const view = await render(
+    h(StandingRules, {
+      state: {
+        busyContext: false,
+        rules: [
+          { id: 'r1', text: 'no em-dashes', source: 'human' },
+          { id: 'p1', text: 'open on the finding', source: 'proposed' },
+        ],
+      },
+    }),
+  );
+
+  try {
+    assert.equal(view.findAll('.rule').length, 2, 'one list');
+    assert.ok(view.find('.rule-human'), 'and the source is on the element');
+    assert.ok(view.find('.rule-proposed'));
+    assert.match(rule('.rule-proposed'), /border-left/, 'with a treatment ready for it');
+  } finally {
+    await view.unmount();
+  }
 });
 
 test('§12 lilac is checked for contrast against the cream ground, not eyeballed', () => {

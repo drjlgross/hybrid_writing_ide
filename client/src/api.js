@@ -46,6 +46,7 @@ export function createApi({ token, fetchImpl = fetch }) {
   }
 
   const post = (path, payload) => request(path, { method: 'POST', body: JSON.stringify(payload) });
+  const del = (path, payload) => request(path, { method: 'DELETE', body: JSON.stringify(payload) });
 
   return {
     // Within this namespace only. There is no call that reaches another one —
@@ -59,5 +60,21 @@ export function createApi({ token, fetchImpl = fetch }) {
     // before the draft is replaced, rather than being thrown away by the restore.
     restore: (slug, turnId, pendingDraft) =>
       post('/restore', { slug, turn_id: turnId, pendingDraft }),
+
+    // §8 and §10. NONE of these commits a turn (§0.10) — separate addresses from
+    // /ai-edit precisely so that is checkable from outside.
+    context: {
+      list: (slug) => request(`/context/${encodeURIComponent(slug)}`),
+      add: (slug, file) => post('/context', { slug, ...file }),
+      describe: (slug, id, description) =>
+        post(`/context/${encodeURIComponent(id)}/description`, { slug, description }),
+      remove: (slug, id) => del(`/context/${encodeURIComponent(id)}`, { slug }),
+      clear: (slug) => post('/context/clear', { slug }),
+    },
+    rules: {
+      add: (slug, text, scope) => post('/rules', { slug, text, scope }),
+      update: (slug, id, patch) => post(`/rules/${encodeURIComponent(id)}`, { slug, ...patch }),
+      remove: (slug, id) => del(`/rules/${encodeURIComponent(id)}`, { slug }),
+    },
   };
 }

@@ -69,6 +69,13 @@ const INITIAL = {
   note: null,
   /** True when the most recent AI turn left the draft untouched (§0.9). */
   speechOnly: false,
+
+  /** §8: context files attached to this DOCUMENT, metadata only. */
+  context: [],
+  /** §10: standing rules, read through §0.11's one function on the server. */
+  rules: [],
+  /** A context or rules write in flight. Separate from `pending` — see below. */
+  busyContext: false,
 };
 
 /**
@@ -111,6 +118,8 @@ export function createDraftSession({ api, editor, slug, onState }) {
       set({
         draft: doc.draft,
         history: doc.history,
+        context: doc.context ?? [],
+        rules: doc.rules ?? [],
         loaded: true,
         dirty: false,
         missing: false,
@@ -292,6 +301,10 @@ export function createDraftSession({ api, editor, slug, onState }) {
         stripped: result.ai_turn?.stripped ?? null,
         note: result.ai_turn?.note ?? '',
         speechOnly: !changed,
+        // §12: chips persist across submits, so it is evident context is still
+        // attached and was not consumed by the last turn.
+        context: result.context ?? state.context,
+        rules: result.rules ?? state.rules,
         notice: notifyOf(result, changed),
       });
       // An AI turn always commits (§3), so the count always moved.
@@ -372,6 +385,42 @@ export function createDraftSession({ api, editor, slug, onState }) {
     }
   }
 
+  /**
+   * Context and rules writes (§8, §10).
+   *
+   * DELIBERATELY NOT ON `pending`. `pending` gates turn-making work and the §0.2
+   * lock hangs off it; attaching a file is not turn-making work, and routing it
+   * through the same flag would make the editor read-only while a screenshot
+   * uploads — which is §0.10's failure in miniature, treating supplying context
+   * as if it were asking for an edit. `busyContext` is its own flag for its own
+   * controls, and the editor stays live throughout.
+   *
+   * Every one of these asserts the turn count did not move. §0.10 is locked; the
+   * server checks it too, and a rule this cheap to verify should be verified on
+   * both sides of the wire.
+   */
+  async function contextWrite(run, what) {
+    if (state.busyContext) return null;
+    const turnsBefore = state.history.length;
+    set({ busyContext: true, error: null, notice: null });
+    try {
+      const result = await run();
+      set({
+        busyContext: false,
+        context: result.context ?? state.context,
+        rules: result.rules ?? state.rules,
+        notice: what,
+      });
+      if (result.turns !== undefined && result.turns !== turnsBefore) {
+        set({ error: `${what} changed the turn count, which §0.10 forbids. Reload before trusting the ledger.` });
+      }
+      return result;
+    } catch (error) {
+      set({ busyContext: false, error: describe(error) });
+      return null;
+    }
+  }
+
   function refuse() {
     set({
       notice:
@@ -390,6 +439,20 @@ export function createDraftSession({ api, editor, slug, onState }) {
     restoreTo,
     createDocument: createDocumentHere,
     refreshLibrary,
+
+    // §8 C1/C2/C5 — attach, describe, discard one, discard all.
+    attachContext: (file) =>
+      contextWrite(() => api.context.add(state.slug, file), `attached ${file.filename}`),
+    describeContext: (id, description) =>
+      contextWrite(() => api.context.describe(state.slug, id, description), 'description saved'),
+    removeContext: (id) => contextWrite(() => api.context.remove(state.slug, id), 'context file removed'),
+    clearContext: () => contextWrite(() => api.context.clear(state.slug), 'all context discarded'),
+
+    // §10 — the human-written half. Individually revocable.
+    addRule: (text) => contextWrite(() => api.rules.add(state.slug, text), 'rule added'),
+    updateRule: (id, patch) => contextWrite(() => api.rules.update(state.slug, id, patch), 'rule updated'),
+    removeRule: (id) => contextWrite(() => api.rules.remove(state.slug, id), 'rule removed'),
+
     getState: () => state,
   };
 }

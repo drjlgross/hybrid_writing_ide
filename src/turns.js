@@ -87,7 +87,17 @@ export const checkpoint = commitHumanTurn;
  *   warnings?: string[], stripped?: Record<string, number>, now?: Date}} options
  * @returns {{doc: object, turn: object}}
  */
-export function commitAiTurn(doc, { draft, prompt, note, segments, warnings, stripped, now = new Date() }) {
+export function commitAiTurn(doc, {
+  draft,
+  prompt,
+  note,
+  segments,
+  warnings,
+  stripped,
+  contextRef,
+  rulesRef,
+  now = new Date(),
+}) {
   assertLedgerInvariant(doc);
 
   if (typeof prompt !== 'string' || prompt.trim() === '') {
@@ -117,6 +127,13 @@ export function commitAiTurn(doc, { draft, prompt, note, segments, warnings, str
   if (segments?.length) turn.segments = segments.map((segment) => ({ ...segment }));
 
   if (warnings?.length) turn.warnings = [...warnings];
+
+  // §3: which context files and which rules were in scope for this turn. Ids
+  // only — the ledger records WHAT WAS SENT, and a turn that carried a file
+  // later discarded still says so. Copying the content in would make every
+  // snapshot carry a screenshot.
+  if (contextRef?.length) turn.context_ref = [...contextRef];
+  if (rulesRef?.length) turn.rules_ref = [...rulesRef];
 
   // §2.3 requires the stripped counts as structured data on the turn, not only as
   // a formatted string, so the history view can render them and an export can
@@ -173,6 +190,8 @@ export async function submitAiPrompt(doc, {
     segments: revised.segments,
     warnings: revised.warnings,
     stripped: revised.stripped,
+    contextRef: revised.contextRef,
+    rulesRef: revised.rulesRef,
     now: now(),
   });
 

@@ -19,7 +19,16 @@ import { AiResponseError } from './ai-response.js';
 import { runAiEdit } from './ai-edit.js';
 import { createModelCaller } from './anthropic-client.js';
 import { DEFAULT_SLUG, DEFAULT_TOKEN, documentAddress, resolveSlug } from './addressing.js';
-import { DOCUMENTS_ROOT, InvalidTokenError, resolveNamespace } from './namespace.js';
+import {
+  ContextError,
+  addContextFile,
+  clearContext,
+  describeContextFile,
+  listContext,
+  removeContextFile,
+} from './context-store.js';
+import { DOCUMENTS_ROOT, InvalidTokenError, resolveNamespaceFiles } from './namespace.js';
+import { RuleError, addRule, removeRule, resolveRules, updateRule } from './rules-store.js';
 import {
   LedgerInvariantError,
   SlugCollisionError,
@@ -57,7 +66,9 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
    */
   function withNamespace(req, res, next) {
     try {
-      req.namespace = resolveNamespace(req.params.token, { root });
+      // The one function (§0.5). It now also answers where this namespace's
+      // context file CONTENT lives; handlers still never see the token.
+      req.namespace = resolveNamespaceFiles(req.params.token, { root });
       next();
     } catch (error) {
       if (error instanceof InvalidTokenError) {
@@ -255,6 +266,126 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
     }
   });
 
+  // ── context files (§8) and standing rules (§10) ───────────────────────────────
+  /**
+   * §0.10 IS THE RULE THESE ROUTES EXIST TO OBEY: none of them commits a turn.
+   *
+   * Every handler below mutates `context` or `rules` and leaves `draft` and
+   * `history` exactly as they were. Supplying context and asking for an edit are
+   * different acts, and conflating them produces the unrequested rewrite the
+   * evidence says most reliably destroys trust — so there is no path from any of
+   * these to `commitHumanTurn`, by construction rather than by discipline.
+   *
+   * They are also deliberately NOT under `/ai-edit`: a separate address is what
+   * makes "adding context did not run a turn" checkable from outside.
+   */
+  function mutateDocument(req, res, mutate) {
+    const dir = req.namespace.dir;
+    const slug = req.body?.slug ?? req.params.slug;
+
+    if (typeof slug !== 'string' || slug === '') {
+      res.status(400).json({ error: 'slug is required' });
+      return;
+    }
+
+    try {
+      const doc = loadDocument(slug, { dir });
+      const before = { draft: doc.draft, turns: doc.history.length };
+
+      const next = mutate(doc, req.namespace);
+      const saved = saveDocument(next.doc ?? next, { dir });
+
+      // Asserted, not assumed. §0.10 is a locked decision and this is the cheapest
+      // place to prove it held: if a context write ever moves the draft or the
+      // ledger, the request fails rather than the corruption shipping.
+      if (saved.draft !== before.draft || saved.history.length !== before.turns) {
+        res.status(500).json({
+          error: 'a context or rules write changed the draft or the ledger (§0.10). Refused.',
+          context_mutation_touched_draft: true,
+        });
+        return;
+      }
+
+      res.json({
+        context: listContext(saved),
+        rules: resolveRules(saved),
+        ...(next.file ? { file: next.file } : {}),
+        ...(next.rule ? { rule: next.rule } : {}),
+        // Echoed so the client can assert the same thing the server just did.
+        turns: saved.history.length,
+      });
+    } catch (error) {
+      if (error instanceof ContextError || error instanceof RuleError) {
+        res.status(400).json({ error: error.message, reason: error.reason });
+        return;
+      }
+      res.status(error.code === 'ENOENT' ? 404 : 500).json({ error: error.message });
+    }
+  }
+
+  api.get('/context/:slug', (req, res) => {
+    const dir = req.namespace.dir;
+    try {
+      const doc = loadDocument(resolveSlug(req.params.slug), { dir });
+      res.json({ context: listContext(doc), rules: resolveRules(doc) });
+    } catch (error) {
+      res.status(error.code === 'ENOENT' ? 404 : 500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /context {slug, filename, type, data, description}
+   *
+   * `data` is base64 on the wire and NEVER on disk in that form (§0.5 amended):
+   * it is decoded here and written as bytes to `files/{id}`, and only metadata
+   * reaches the document JSON.
+   */
+  api.post('/context', (req, res) => {
+    const { filename, type, data, description } = req.body ?? {};
+    if (typeof data !== 'string' || data === '') {
+      res.status(400).json({ error: 'data must be a base64 string' });
+      return;
+    }
+    mutateDocument(req, res, (doc, namespace) =>
+      addContextFile(doc, {
+        filename,
+        type,
+        description,
+        bytes: Buffer.from(data, 'base64'),
+        filesDir: namespace.filesDir,
+      }),
+    );
+  });
+
+  /** §8 C2: rewrite a description. Never a turn. */
+  api.post('/context/:id/description', (req, res) => {
+    mutateDocument(req, res, (doc) => describeContextFile(doc, req.params.id, req.body?.description));
+  });
+
+  /** §8 C5: discard one. */
+  api.delete('/context/:id', (req, res) => {
+    mutateDocument(req, res, (doc, namespace) =>
+      removeContextFile(doc, req.params.id, { filesDir: namespace.filesDir }),
+    );
+  });
+
+  /** §8 C5: discard all of it, in one action — a first-class operation. */
+  api.post('/context/clear', (req, res) => {
+    mutateDocument(req, res, (doc, namespace) => clearContext(doc, { filesDir: namespace.filesDir }));
+  });
+
+  api.post('/rules', (req, res) => {
+    mutateDocument(req, res, (doc) => addRule(doc, { text: req.body?.text, scope: req.body?.scope }));
+  });
+
+  api.post('/rules/:id', (req, res) => {
+    mutateDocument(req, res, (doc) => updateRule(doc, req.params.id, req.body ?? {}));
+  });
+
+  api.delete('/rules/:id', (req, res) => {
+    mutateDocument(req, res, (doc) => removeRule(doc, req.params.id));
+  });
+
   // ── the AI edit ───────────────────────────────────────────────────────────────
   /**
    * POST /ai-edit {slug, prompt, pendingDraft?}
@@ -276,12 +407,22 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
     }
 
     try {
-      const result = await runAiEdit({ slug, prompt, pendingDraft, dir: req.namespace.dir, callModel });
+      const result = await runAiEdit({
+        slug,
+        prompt,
+        pendingDraft,
+        dir: req.namespace.dir,
+        filesDir: req.namespace.filesDir,
+        callModel,
+      });
       res.json({
         draft: result.draft,
         human_turn: result.humanTurn,
         ai_turn: result.aiTurn,
         history: result.doc.history,
+        // Chips persist across submits (§12): context was not consumed by the turn.
+        context: listContext(result.doc),
+        rules: resolveRules(result.doc),
       });
     } catch (error) {
       // §2.3: on any of these the draft is unchanged and the editor unlocks. The

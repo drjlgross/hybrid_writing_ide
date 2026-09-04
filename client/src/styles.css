@@ -418,6 +418,173 @@ body {
   cursor: not-allowed;
 }
 
+/* ── context chips (§8) and standing rules (§10) ─────────────────────────── */
+
+/* §12: chips persist between turns, so it is evident context is still attached
+   and was not consumed by the last submit. They sit under the action row rather
+   than above the textarea because the prompt is what she is typing into and the
+   chips are standing state. */
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  padding: 0.4rem 0.5rem;
+}
+
+/* §8 C3: extraction failure surfaces ON THE CHIP. Amber, not red — the file is
+   still attached and she may still want it; what failed is the reading. */
+.chip-failed {
+  border-color: var(--warn);
+  background: #fdf8ef;
+}
+
+.chip-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.chip-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.chip-image .chip-name::before {
+  content: '▣ ';
+  color: var(--muted);
+}
+
+.chip-text .chip-name::before {
+  content: '▤ ';
+  color: var(--muted);
+}
+
+.chip-remove,
+.rule-remove {
+  margin-left: auto;
+  flex: none;
+  font: inherit;
+  line-height: 1;
+  padding: 0 0.25rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chip-error {
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+  color: var(--warn);
+}
+
+/* §8 C2: freeform, editable in place. Underline rather than a box, so it reads
+   as a caption she can rewrite rather than a form field she must fill. */
+.chip-description,
+.rule-text {
+  width: 100%;
+  margin-top: 0.25rem;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.15rem 0;
+  border: 0;
+  border-bottom: 1px dashed var(--line);
+  background: none;
+  color: var(--ink);
+}
+
+.chip-description::placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* §8 C5: wholesale discard as a first-class operation, not a hidden one. */
+.chip-clear {
+  align-self: flex-start;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* §10 calls it a bullet list, so it keeps its bullets. `display: flex` on the
+   item suppresses the list marker, hence the ::before below. */
+.rule-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+/* The text and its remove control on ONE line. The input is a block element, so
+   without this the `×` wraps underneath and the list reads as six items rather
+   than three. */
+.rule {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin-bottom: 0.35rem;
+}
+
+.rule::before {
+  content: '•';
+  flex: none;
+  color: var(--muted);
+}
+
+.rule-text {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+  font-size: 0.85rem;
+}
+
+/* Step 16 hangs off this: a proposed rule is the same store with a different
+   `source`, so it needs a treatment and not a second list. */
+.rule-proposed {
+  border-left: 2px solid var(--lilac-edge);
+  padding-left: 0.4rem;
+}
+
+.rule-add {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.rule-add input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.rule-submit {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
 /* Forest green: the primary action inside a box, and the only thing that wears
    this treatment (§12). */
 .submit {

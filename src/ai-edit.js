@@ -16,7 +16,12 @@
  */
 
 import { validateAiResponse } from './ai-response.js';
+import { listContext, readContextContent } from './context-store.js';
 import { formatDiffForPrompt } from './diff.js';
+import { formatRulesForPrompt, resolveRules } from './rules-store.js';
+
+/** Rule ids in scope, read through §0.11's one function. */
+const resolveRuleIds = (doc) => resolveRules(doc).map((rule) => rule.id);
 import { assertLedgerInvariant, loadDocument, saveDocument } from './storage.js';
 import { getTurn, submitAiPrompt } from './turns.js';
 
@@ -61,7 +66,7 @@ export function humanEditDiff(doc, humanTurn) {
  * }} options
  * @returns {Promise<{doc: object, draft: string, humanTurn: object|null, aiTurn: object}>}
  */
-export async function runAiEdit({ slug, prompt, pendingDraft, dir, callModel, now }) {
+export async function runAiEdit({ slug, prompt, pendingDraft, dir, filesDir, callModel, now }) {
   if (typeof prompt !== 'string' || prompt.trim() === '') {
     throw new Error('an AI edit needs a prompt string');
   }
@@ -84,11 +89,35 @@ export async function runAiEdit({ slug, prompt, pendingDraft, dir, callModel, no
       // Step 3: the diff of the human turn just committed.
       const diff = humanEditDiff(afterHuman, humanTurn);
 
+      // §2.1 items 4 and 5. Content is read HERE and nowhere else — a document
+      // listing must never pay for a screenshot, which is why §0.5 keeps the
+      // bytes out of the document JSON.
+      const files = listContext(afterHuman);
+      const context = filesDir
+        ? files.map((file) => {
+            const loaded = readContextContent(file, { filesDir });
+            return loaded.error ? { ...loaded, file } : { ...loaded, file };
+          })
+        : [];
+      const rules = formatRulesForPrompt(afterHuman);
+
       // Step 4: the API call.
-      const body = await callModel({ draft, prompt, humanEditDiff: diff });
+      const body = await callModel({ draft, prompt, humanEditDiff: diff, context, rules });
 
       // Step 5: every §2.3 guard. Throws rather than returning a bad draft.
-      return validateAiResponse(body, { draft, prompt });
+      const result = validateAiResponse(body, { draft, prompt });
+
+      // §8 C3: a file that could not be read is a warning ON THE TURN, so the
+      // record says the model answered without it rather than leaving the human
+      // to wonder why the context did not land.
+      const unreadable = context.filter((entry) => entry.error).map((entry) => entry.error);
+      return {
+        ...result,
+        warnings: unreadable.length > 0 ? [...result.warnings, ...unreadable] : result.warnings,
+        // §3: what was in scope for this turn, by id.
+        contextRef: files.map((file) => file.id),
+        rulesRef: resolveRuleIds(afterHuman),
+      };
     },
   });
 
