@@ -36,6 +36,11 @@ Every report contains:
 - anything in the spec that was wrong or underspecified
 - what you did NOT verify, named as such
 
+A chunk is not done until the Build order section's state line names it. Updating that
+line is part of the chunk's definition of done, alongside the report — the section whose
+whole job is saying where in the process we are is worthless the moment it lags reality,
+and it lags by default unless the chunk that moved it says so.
+
 Section 0 decisions are locked. If one seems wrong, say so and stop — do not change it,
 and do not write code that depends on changing it. Report the collision before the code
 exists, not as a finding afterward.
@@ -45,6 +50,30 @@ the assistant's own accord — ratification is the human's act even when the
 assistant types the command. Before any commit: run `node scripts/secret-scan.js`
 and proceed only on exit 0. A hit means stop, show the finding, and wait;
 committing over a failed scan is never correct.
+
+### Versioning
+
+The APP version lives in `package.json`. It stays `0.0.0` until first deploy and becomes
+`0.1.0` at deploy (the Build order section's step 13).
+
+After that, **every ratified commit — chunk or fix — bumps the patch version as part of
+that commit**. The bump is inside the ratification, never a commit of its own and never
+an edit made outside one: the version is what the human ratified, so it moves when she
+ratifies and at no other time. Minor bumps are reserved for milestone-grade changes she
+names explicitly as such; the assistant does not decide a change has earned one.
+
+Each ratified commit also appends one line to `CHANGELOG.md`: the version, a
+one-sentence description, and a `(behavior change)` tag when a user will notice the tool
+acting differently. Behavior changes on a deployed tool are the reason this exists — see
+step 14.
+
+The app version is distinct from `schema_version` in stored documents and exports (§0.5,
+§4), which moves only when the data shape changes. Neither implies the other, and a patch
+bump must never be read as a data migration.
+
+The deployed UI surfaces the current version somewhere a bug reporter can find it. A
+report that cannot name the version it came from costs a round trip to establish what
+was running.
 
 Do not install runtime dependencies beyond the npm packages this spec names.
 
@@ -1062,7 +1091,7 @@ column, so nothing here may put one over the other.
 a click — not inside the switcher drawer, and not inside any other drawer or menu.
 Resolves F51, 2026-09-03. §0.5 requires that a namespace "be described that way to
 anyone given a link", and a disclosure someone has to go looking for cannot do the one
-job it has: stopping a person from treating a capability URL as private. Step 14 is
+job it has: stopping a person from treating a capability URL as private. Step 13 is
 deploy, and real people will be holding real links.
 
 **Removed:** the Documents panel (creation and switching move to the top row) and
@@ -1160,9 +1189,13 @@ not by number, so the reference survives every extension.
 Entries are pointers. Anything a chunk needs to know lives in the section it names;
 what belongs here is *where in the sequence* and *why there*.
 
-Steps 1–10 are built, tested, and committed: canonicalize, round-trip, storage, turn
-model and Checkpoint, AI endpoint, editor and panel, clipboard fixture, history view,
-the spec extension, and the §12 UI cleanup. The detail is in git and in `reports/`.
+Steps 1–12 are built, tested, committed, and live-verified, through the chunk-12
+commit: canonicalize, round-trip, storage, turn model and Checkpoint, AI endpoint,
+editor and panel, clipboard fixture, history view, the spec extension, the §12 UI
+cleanup, model speech, and context files plus human-written standing rules. The detail
+is in git and in `reports/`.
+
+This state line is maintained by the chunk it describes, per the Operating rules.
 
 9. **Spec extension.** This file. No code.
 
@@ -1175,12 +1208,24 @@ the spec extension, and the §12 UI cleanup. The detail is in git and in `report
 12. **Context files and human-written standing rules.** §8, plus §10's human-written
     half. Independent of staging.
 
-13. **Staging and disposition.** §0.8, §0.9, the full §2.2 contract, §12. Do not merge
-    this with anything.
+**Deploy and staging swapped 2026-09-04, ratified.** Deploy was step 14 and staging
+step 13; they are now 13 and 14. The numbers below are the current order.
 
-14. **Deploy.** Railway with a persistent volume, per §0.5 and §0.6. Resolve F37 first.
-    Downstream of step 13 by decision: a version worth using exists before a version is
-    hosted.
+13. **Deploy.** Railway with a persistent volume, per §0.5 and §0.6. Resolve F37 first.
+    Its precondition — a version worth using exists before a version is hosted — is now
+    satisfied evidence rather than a forecast: the interim §2.2 contract is field-proven
+    in `reports/chunk-12.md`, which reports all three required live turns passing plus a
+    real task worked the same night. A shareable link now generates more learning than
+    further solo feature work does, and that is what moved it.
+
+    Accepted knowingly: staging therefore lands as a behavior change on deployed
+    infrastructure rather than before anyone is holding a link. That is the cost of the
+    reorder, priced in, not an oversight to be discovered later. It is also why the
+    Versioning rule exists in the Operating rules above.
+
+14. **Staging and disposition.** §0.8, §0.9, the full §2.2 contract, §12. Do not merge
+    this with anything. Now downstream of deploy, so it ships to people already using
+    the tool: it is a `(behavior change)` line in `CHANGELOG.md` by definition.
 
 15. **Segmentation.** §2.2's `segments` surfaced, contingent candidates marked,
     panel↔editor links. Provisional per §9.
