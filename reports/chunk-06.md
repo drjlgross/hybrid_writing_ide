@@ -321,6 +321,14 @@ prints a warning; nothing enforces anything. Before deploying, either refuse the
 default token when not bound to localhost, or accept that one namespace is world-
 writable. This wants a decision from you, not from me.
 
+> *[Added 2026-09-04, deploy-readiness chunk.* **RESOLVED** *— the first option was
+> taken and is written into §0.5: off a loopback binding, the default token is
+> refused with 403. Two corrections to the text above, left in place rather than
+> rewritten. "§9 step 9" was the build-order numbering of the day; deploy is now
+> step 13, and the Build order section is unnumbered. Separately, CLAUDE.md §13's
+> F40–F47 block overlapped this report's F40–F46; that block was renumbered to
+> F81–F88 and the numbers in this file are unchanged.]*
+
 **F38. Tokens are lowercase-hex only, which §0.5 does not specify.** "32 hex
 characters" leaves case open. I rejected uppercase, because macOS and Windows
 filesystems are case-insensitive: `AB…` and `ab…` would be one directory on your
@@ -357,6 +365,10 @@ token and slug will both load, both modify, and the second save clobbers the fir
 and a capability token is *shared by construction*, so "single local user" is no
 longer a safe assumption the way it was. Not fixed here; naming it because the
 namespace change moved the risk.
+
+> *[Added 2026-09-04, deploy-readiness chunk.* **RESOLVED AS ACCEPTED** *for v1 —
+> last Checkpoint wins, the ledger keeps both parties' turns, and §12's capability
+> disclosure carries a sentence about it. Written into §0.5. Decided, not fixed.]*
 
 **F44. I ran `git status --porcelain` once, which the operating rules forbid.** It was
 read-only, during recovery from F45, to work out which files the killed mutation

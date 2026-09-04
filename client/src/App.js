@@ -67,10 +67,36 @@ export function App({
   // §4: "a toggleable timeline". Off by default — the draft is what you came for.
   const [showHistory, setShowHistory] = useState(false);
 
+  /**
+   * The version the SERVER is running (§ Versioning), for the footer.
+   *
+   * Fetched rather than compiled in, on purpose: what a bug reporter needs is the
+   * version of the thing that just misbehaved, and a number baked into this bundle
+   * at build time would report the build, not the deployment. `null` until it
+   * lands and stays null if the call fails — a footer is diagnostic and must never
+   * be the reason a page does not render.
+   */
+  const [version, setVersion] = useState(null);
+
   // Not null-until-loaded: the editor's mount point must be in the DOM before the
   // effect below can build the editor into it, so the layout renders from the
   // start and fills in. A placeholder first render would leave `mountRef` empty.
   const [state, setState] = useState(() => initialSessionState(slug));
+
+  useEffect(() => {
+    let live = true;
+    Promise.resolve()
+      .then(() => makeApi({ token }).health())
+      .then((health) => {
+        if (live && typeof health?.version === 'string') setVersion(health.version);
+      })
+      .catch(() => {
+        /* no version in the footer; nothing else changes */
+      });
+    return () => {
+      live = false;
+    };
+  }, [token]);
 
   useEffect(() => {
     const instance = createEditor
@@ -259,7 +285,9 @@ export function App({
       h('p', { key: 'capability', className: 'hint capability' }, [
         'Anyone with this link can read and edit every document in it. There is no login — the link ',
         h('em', { key: 'is' }, 'is'),
-        ' the key. Share it the way you would share a key.',
+        ' the key. Share it the way you would share a key. If two of you have it open at ',
+        'once, the last Checkpoint wins — the history keeps both, but unsaved typing in the ',
+        'other tab is lost.',
       ]),
     ]),
     h('main', { key: 'workspace', className: 'workspace' }, [
@@ -313,6 +341,16 @@ export function App({
             onRestore: (turnId) => sessionRef.current.restoreTo(turnId),
           })
         : null,
+    ]),
+
+    // The § Versioning rule: "the deployed UI surfaces the current version
+    // somewhere a bug reporter can find it". §12 enumerates the top row and the
+    // three boxes and stops, so this is the one piece of chrome outside it — put
+    // at the bottom, quiet, because it is for the moment something has gone wrong
+    // and for no other moment. A report that cannot name the version it came from
+    // costs a round trip to establish what was running.
+    h('footer', { key: 'footer', className: 'colophon' }, [
+      h('span', { key: 'v' }, version ? `version ${version}` : 'version unavailable'),
     ]),
   ]);
 }

@@ -108,7 +108,18 @@ test('resolveNamespace is the one function: token in, directory out, no sanitizi
   const token = generateToken();
   assert.deepEqual(resolveNamespace(token, { root: 'documents' }), {
     dir: join('documents', token),
+    // The usage ledger's attribution handle. Derived here so no handler ever
+    // slices a token itself (§0.5).
+    label: token.slice(0, 8),
   });
+
+  // The label is a PREFIX and must stay one. A capability token is the whole
+  // identity, so a label long enough to be the token would put a credential in
+  // every log line the ledger writes.
+  const { label } = resolveNamespace(token, { root: 'documents' });
+  assert.equal(label.length, 8, 'eight characters, not more');
+  assert.notEqual(label, token, 'the label is never the token');
+  assert.ok(token.startsWith(label), 'and it is genuinely a prefix of it');
 
   // §0.5: reject, never repair.
   for (const bad of ['../../etc', 'ABCDEF0123456789abcdef0123456789', 'short', '', null]) {

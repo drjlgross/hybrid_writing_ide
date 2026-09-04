@@ -17,6 +17,12 @@ export class ApiError extends Error {
     // §2.3: the one fact the human most needs after a failed AI turn.
     this.draft_unchanged = body.draft_unchanged === true;
     this.invalid_token = body.invalid_token === true;
+    // The operator has run out of credit or hit a spend limit. A distinct state
+    // from an ordinary failure because retrying cannot fix it and the person
+    // reading the message is not the person who can.
+    this.budget_exhausted = body.budget_exhausted === true;
+    // §0.5's F37 refusal: the fixed development namespace, off localhost.
+    this.default_token_refused = body.default_token_refused === true;
   }
 }
 
@@ -49,6 +55,16 @@ export function createApi({ token, fetchImpl = fetch }) {
   const del = (path, payload) => request(path, { method: 'DELETE', body: JSON.stringify(payload) });
 
   return {
+    /**
+     * The server's liveness and the version it is running.
+     *
+     * The one call that does NOT go through `base`: a health check that needs a
+     * capability token is not a health check. It is also why the footer shows the
+     * version the SERVER is running rather than one baked into this bundle at
+     * build time — that is the number a bug report needs.
+     */
+    health: () => fetchImpl('/health').then((response) => response.json()),
+
     // Within this namespace only. There is no call that reaches another one —
     // the token in `base` is the whole address space (§0.5).
     list: () => request('/library'),

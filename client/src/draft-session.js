@@ -503,13 +503,32 @@ function notifyOf(result, changed) {
 }
 
 /**
+ * What the human is told when the operator's credit or spend limit is gone.
+ *
+ * Exported so the test asserts the string the panel actually renders rather than
+ * a copy of it. It replaces the API's own message wholesale: "the model API
+ * returned 402" is true, useless, and reads as a bug in the app.
+ */
+export const BUDGET_EXHAUSTED_MESSAGE = "You've outrun the demo budget — tell Julia!";
+
+/**
  * Turn anything thrown into a sentence a writer can act on.
  *
  * The §2.3 failures all mean the same thing to the human — your text is still
  * there — and that has to be said out loud, because the visible symptom is an AI
  * turn that did nothing.
+ *
+ * Budget exhaustion is the one failure with its own sentence, because it is the
+ * one the reader cannot act on and can only report. Everything else keeps the
+ * generic error, including an API failure this could not confidently classify —
+ * an ambiguous failure told as a definite one is worse than a vague true one.
  */
 function describe(error) {
+  if (error?.budget_exhausted) {
+    // The draft guarantee still goes with it: that is the fact the writer needs
+    // first, whatever the cause.
+    return `${BUDGET_EXHAUSTED_MESSAGE} Your draft is exactly as you left it.`;
+  }
   if (error?.draft_unchanged) {
     return `${error.message} Your draft is exactly as you left it.`;
   }

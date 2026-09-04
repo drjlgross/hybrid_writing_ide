@@ -277,6 +277,81 @@ export function buildUserMessage(input) {
 }
 
 /**
+ * A non-2xx from the model API, carrying the structured fields intact.
+ *
+ * The old code threw `new Error("the model API returned 402: …")`, which meant the
+ * only way to ask what kind of failure it was, was to parse a sentence. Everything
+ * downstream now reads fields.
+ */
+export class ModelApiError extends Error {
+  constructor(message, detail = {}) {
+    super(message);
+    this.name = 'ModelApiError';
+    this.status = detail.status ?? 0;
+    /** The API's own `error.type` string, e.g. `billing_error`. Null if absent. */
+    this.apiErrorType = detail.apiErrorType ?? null;
+    /** True when the operator has run out of money, not when the request was bad. */
+    this.budgetExhausted = detail.budgetExhausted === true;
+    /** Which signal fired, for the report and for the logs. */
+    this.budgetSignal = detail.budgetSignal ?? null;
+  }
+}
+
+/**
+ * Did this failure mean "the operator is out of money"?
+ *
+ * Verified against https://platform.claude.com/docs/en/api/errors (fetched
+ * 2026-09-04), not from memory. The docs put budget exhaustion behind THREE
+ * different statuses, and only two of them are distinguishable from an ordinary
+ * failure by structured fields:
+ *
+ *   402 `billing_error`   "There's an issue with your billing or payment
+ *                          information." Unambiguous — 402 has no other meaning on
+ *                          this API. This is the credit-balance case.
+ *
+ *   429 `rate_limit_error` covers BOTH ordinary rate limiting AND "reached its
+ *                          usage tier's monthly spend cap". The docs give the
+ *                          discriminator: "A tier spend-cap 429 has no
+ *                          `retry-after` header and keeps failing until access
+ *                          resumes." So 429 WITH `retry-after` is transient and
+ *                          stays generic; 429 WITHOUT it is the spend cap.
+ *
+ *   400 `invalid_request_error` is ALSO returned "when usage reaches an
+ *                          organization or workspace spend limit you set" — and it
+ *                          is the same status and type as every malformed request.
+ *                          Structurally indistinguishable, and the docs publish no
+ *                          message text for it.
+ *
+ * The 400 case is therefore the one place this reads the message, and it is scoped
+ * to the platform's own vocabulary for the condition. It is a SECONDARY signal: the
+ * two above stand on their own, and if this one never fires the feature still
+ * works. A false positive costs a wrong-but-harmless sentence; a false negative
+ * costs the whole point. Anything else 400 says falls through to the generic error,
+ * which is what an ambiguous failure deserves.
+ *
+ * @param {{status: number, body: unknown, retryAfter: string|null}} response
+ * @returns {{budgetExhausted: boolean, apiErrorType: string|null, budgetSignal: string|null}}
+ */
+export function classifyApiFailure({ status, body, retryAfter = null } = {}) {
+  const apiErrorType = typeof body?.error?.type === 'string' ? body.error.type : null;
+  const message = typeof body?.error?.message === 'string' ? body.error.message : '';
+  const exhausted = (budgetSignal) => ({ budgetExhausted: true, apiErrorType, budgetSignal });
+
+  if (status === 402) return exhausted('402 billing_error');
+
+  // Absent, not empty-string absent: a `retry-after: 0` is still a retry-after.
+  if (status === 429 && (retryAfter === null || retryAfter === undefined)) {
+    return exhausted('429 with no retry-after (tier spend cap)');
+  }
+
+  if (status === 400 && /credit balance|spend limit|spend cap|usage limit/i.test(message)) {
+    return exhausted('400 naming a spend limit');
+  }
+
+  return { budgetExhausted: false, apiErrorType, budgetSignal: null };
+}
+
+/**
  * Build a caller for the real API.
  *
  * @param {{apiKey?: string, fetchImpl?: typeof fetch, model?: string, timeoutMs?: number}} [options]
@@ -338,7 +413,28 @@ export function createModelCaller({
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw new Error(`the model API returned ${response.status}: ${detail.slice(0, 400)}`);
+
+      // Parsed for its FIELDS, not for its prose. The body may not be JSON at all
+      // — a proxy or a gateway can return HTML — so a failure to parse is a body
+      // with no structured fields, which classifies as generic, not as a crash on
+      // top of a crash.
+      let body = null;
+      try {
+        body = JSON.parse(detail);
+      } catch {
+        /* not JSON; classify on the status alone */
+      }
+
+      const classified = classifyApiFailure({
+        status: response.status,
+        body,
+        retryAfter: response.headers?.get?.('retry-after') ?? null,
+      });
+
+      throw new ModelApiError(
+        `the model API returned ${response.status}: ${detail.slice(0, 400)}`,
+        { status: response.status, ...classified },
+      );
     }
 
     return response.json();

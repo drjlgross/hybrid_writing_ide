@@ -1,0 +1,64 @@
+# Run the test suite on every push and pull request.
+#
+# HERMETIC BY REQUIREMENT, not by luck. CLAUDE.md's Headless browser rules say
+# `npm test` must pass on a fresh clone with no browser binary, and the whole
+# suite must run with no API key and no network — tests inject a stub model
+# caller and never reach api.anthropic.com. This workflow is the standing proof
+# of both claims: it is the fresh clone, and it has no secrets to leak into the
+# environment even by accident.
+#
+# So, deliberately absent:
+#   - ANTHROPIC_API_KEY. Nothing under test needs one.
+#   - a Playwright browser download. `npm test` holds no browser tests; when
+#     they arrive they get their own script, which this workflow will not run.
+#   - any network beyond `npm ci` fetching from the registry.
+#
+# PLAYWRIGHT_BROWSERS_PATH=0 is set anyway: if a dependency ever tries a
+# postinstall browser download, it lands inside the project rather than in a
+# machine-wide cache, which is the same rule the Sandbox section applies locally.
+
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: '0'
+      # Skips the browser binary download during `npm ci`. The devDependency is
+      # still installed; only the ~200MB of Chromium is not fetched.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the `engines` field in package.json. Node's built-in test
+          # runner and the ESM the whole project is written in both need a
+          # current runtime.
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: npm test
+        run: npm test
+
+      # The provenance model end to end, headless. CLAUDE.md: "Run
+      # `node scripts/smoke-session.js` after every chunk" — so CI runs it too,
+      # rather than trusting that someone did.
+      - name: smoke session
+        run: npm run smoke
+
+      # A build that does not build is a deploy that fails at the worst moment.
+      # Cheap here, and it is the same command the host runs.
+      - name: build the client
+        run: npm run build
+
+      # No key material in the tree. Same scan the pre-commit rule requires.
+      - name: secret scan
+        run: node scripts/secret-scan.js

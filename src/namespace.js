@@ -18,8 +18,17 @@ import { DEFAULT_TOKEN, TOKEN_PATTERN, isValidToken } from './addressing.js';
 
 export { DEFAULT_SLUG, DEFAULT_TOKEN, TOKEN_PATTERN, isValidToken } from './addressing.js';
 
-/** Where all namespaces live. One directory per token. */
-export const DOCUMENTS_ROOT = 'documents';
+/**
+ * Where all namespaces live. One directory per token.
+ *
+ * Configurable via DOCUMENTS_ROOT because a host mounts a persistent volume at a
+ * path of its choosing, and drafts that live inside the container image are
+ * deleted by the next deploy. Read once at import: it is a property of how the
+ * process was started, not something that changes under a running server.
+ *
+ * The default is unchanged, so nothing local moves and no test has to know.
+ */
+export const DOCUMENTS_ROOT = process.env.DOCUMENTS_ROOT || 'documents';
 
 /** Thrown when a token is not exactly 32 hex characters. Never sanitized (§0.5). */
 export class InvalidTokenError extends Error {
@@ -49,9 +58,18 @@ export function generateToken() {
  * is explicit that sanitizing is the wrong move here — a sanitized `../../etc` is a
  * path traversal that looks like it was handled.
  *
+ * It also derives the namespace's LABEL — the first eight characters of the token
+ * — for the usage ledger (src/usage-ledger.js). That is here rather than at the
+ * call site on purpose: attributing cost to a namespace needs *something* that
+ * identifies it, and the alternative was a handler slicing the token itself, which
+ * is precisely the thing §0.5 says no handler does. Eight characters distinguish
+ * the handful of people who will hold a link and are useless to anyone who finds
+ * the log; the full token is a credential and never leaves this function.
+ *
  * @param {string} token
  * @param {{root?: string}} [options]
- * @returns {{dir: string}} the resolved namespace; handlers get this, never the token
+ * @returns {{dir: string, label: string}} the resolved namespace; handlers get
+ *   this, never the token
  */
 export function resolveNamespace(token, { root = DOCUMENTS_ROOT } = {}) {
   if (!isValidToken(token)) {
@@ -63,7 +81,7 @@ export function resolveNamespace(token, { root = DOCUMENTS_ROOT } = {}) {
     );
   }
 
-  return { dir: join(root, token) };
+  return { dir: join(root, token), label: token.slice(0, 8) };
 }
 
 /**
@@ -82,7 +100,7 @@ export function resolveNamespace(token, { root = DOCUMENTS_ROOT } = {}) {
  *
  * @param {string} token
  * @param {{root?: string}} [options]
- * @returns {{dir: string, filesDir: string}}
+ * @returns {{dir: string, filesDir: string, label: string}}
  */
 export function resolveNamespaceFiles(token, { root = DOCUMENTS_ROOT } = {}) {
   const namespace = resolveNamespace(token, { root });

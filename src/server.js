@@ -17,8 +17,9 @@ import express from 'express';
 
 import { AiResponseError } from './ai-response.js';
 import { runAiEdit } from './ai-edit.js';
-import { createModelCaller } from './anthropic-client.js';
+import { ModelApiError, createModelCaller } from './anthropic-client.js';
 import { DEFAULT_SLUG, DEFAULT_TOKEN, documentAddress, resolveSlug } from './addressing.js';
+import { DEFAULT_TOKEN_REFUSED, allowsDefaultToken } from './binding.js';
 import {
   ContextError,
   addContextFile,
@@ -39,21 +40,52 @@ import {
   saveDocument,
 } from './storage.js';
 import { checkpoint, commitHumanTurn, getTurn, restoreToTurn } from './turns.js';
+import { recordUsage } from './usage-ledger.js';
+import { APP_VERSION } from './version.js';
 
 const CLIENT_DIST = fileURLToPath(new URL('../client/dist/', import.meta.url));
 
 /**
- * @param {{callModel: Function, root?: string}} options
- *   `root` is the directory holding all namespaces; tests point it at a temp dir.
+ * @param {{callModel: Function, root?: string, host?: string}} options
+ *   `root` is the directory holding all namespaces; tests point it at a temp dir,
+ *   and a deployment points it at a mounted volume via DOCUMENTS_ROOT.
+ *   `host` is the address the server is (or will be) bound to. It decides one
+ *   thing: whether §0.5's fixed default token is served at all (F37). Defaulting
+ *   to loopback means a caller who says nothing gets the permissive local
+ *   behaviour, and a deployment has to bind 0.0.0.0 to be reachable, which is
+ *   exactly the act that turns the refusal on.
  * @returns {import('express').Express}
  */
-export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
+export function createServer({ callModel, root = DOCUMENTS_ROOT, host = '127.0.0.1' } = {}) {
   if (typeof callModel !== 'function') {
     throw new TypeError('createServer needs a callModel function');
   }
 
   const app = express();
   app.use(express.json({ limit: '10mb' }));
+
+  // Whether this binding may serve the guessable development namespace (§0.5,
+  // F37). Computed once: it is a property of how the process was started, and
+  // recomputing it per request would invite it becoming per-request state.
+  const defaultTokenAllowed = allowsDefaultToken(host);
+
+  // ── health ────────────────────────────────────────────────────────────────
+  /**
+   * GET /health — liveness plus the running version.
+   *
+   * Deliberately OUTSIDE the namespaced router: a health check that needs a
+   * capability token is not a health check, and the platform probing it has no
+   * token to give. It therefore says nothing namespace-specific — no document
+   * counts, no namespace list (§0.5 forbids the latter outright).
+   *
+   * The version is here because the § Versioning rule requires a bug reporter be
+   * able to find it, and this is the one address that answers without a link.
+   * The UI footer reads it from here, so what the footer shows is what the server
+   * is actually running rather than what some bundle was built from.
+   */
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok', version: APP_VERSION });
+  });
 
   // ── namespace resolution ──────────────────────────────────────────────────────
   /**
@@ -66,6 +98,19 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
    */
   function withNamespace(req, res, next) {
     try {
+      // F37 (§0.5, resolved 2026-09-04). The fixed development token is guessable
+      // by construction, so off a loopback binding its namespace is world-
+      // writable. Refused here, in the one function that touches the token, which
+      // is why no handler had to learn about it.
+      //
+      // Refused rather than redirected to a generated namespace: a request that
+      // quietly became a different namespace is worse than one that failed, and
+      // it is the same rule the invalid-token branch below already follows.
+      if (!defaultTokenAllowed && req.params.token === DEFAULT_TOKEN) {
+        res.status(403).json({ error: DEFAULT_TOKEN_REFUSED, default_token_refused: true });
+        return;
+      }
+
       // The one function (§0.5). It now also answers where this namespace's
       // context file CONTENT lives; handlers still never see the token.
       req.namespace = resolveNamespaceFiles(req.params.token, { root });
@@ -413,7 +458,23 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
         pendingDraft,
         dir: req.namespace.dir,
         filesDir: req.namespace.filesDir,
-        callModel,
+        // MEASURE, NEVER ENFORCE. The ledger wraps the call rather than living
+        // inside it, so the model caller stays a model caller and nothing on this
+        // path can refuse a request on a cost ground — the Console workspace limit
+        // is the enforcement layer. `recordUsage` never throws (see its file): a
+        // call that has already cost money must not fail on bookkeeping.
+        callModel: async (input) => {
+          const body = await callModel(input);
+          recordUsage({
+            // The token prefix, derived by the one namespace function. No handler
+            // reads a token to produce it (§0.5).
+            label: req.namespace.label,
+            model: body?.model,
+            usage: body?.usage,
+            root,
+          });
+          return body;
+        },
       });
       res.json({
         draft: result.draft,
@@ -445,6 +506,23 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
         res.status(404).json({ error: `no document with slug ${JSON.stringify(slug)}` });
         return;
       }
+
+      // Budget exhaustion is its own state, not a generic failure. "Something went
+      // wrong, try again" is actively wrong here: retrying cannot work, and the
+      // person reading it is a friend on a link who has no way to know the operator
+      // has run out of credit. The client renders the sentence; the server only
+      // says which kind of failure this was. See `classifyApiFailure` for the three
+      // documented shapes and which of them are distinguishable.
+      if (error instanceof ModelApiError && error.budgetExhausted) {
+        res.status(502).json({
+          error: error.message,
+          budget_exhausted: true,
+          budget_signal: error.budgetSignal,
+          draft_unchanged: true,
+        });
+        return;
+      }
+
       res.status(502).json({ error: error.message, draft_unchanged: true });
     }
   });
@@ -469,21 +547,78 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT } = {}) {
       res.sendFile('index.html', { root: CLIENT_DIST });
     });
 
-    app.get('/', (req, res) => res.redirect(documentAddress(DEFAULT_TOKEN)));
   }
+
+  /**
+   * `/` is a signpost, and what it points at depends on the binding.
+   *
+   * Locally it redirects into the development namespace, which is the whole
+   * convenience of a fixed default token. On a deployment that same redirect
+   * would land on the 403 F37 exists to produce — a dead end reached by
+   * following the app's own link, which is worse than no link at all. So there
+   * it says what kind of thing this is and stops.
+   *
+   * MOUNTED WHETHER OR NOT THE CLIENT IS BUILT, deliberately, and this is not
+   * tidiness. Inside the `existsSync` block above, the route's behaviour depended
+   * on build state: a fresh clone, or a deploy whose build step failed, answered
+   * `/` with Express's default "Cannot GET /" — the least informative page
+   * available, served at the exact moment something needs explaining. The
+   * explanation is true with or without a bundle. Found by the fresh-clone
+   * rehearsal, where a test that passed in a developer's tree failed in a clone.
+   */
+  app.get('/', (req, res) => {
+    if (defaultTokenAllowed) {
+      res.redirect(documentAddress(DEFAULT_TOKEN));
+      return;
+    }
+    res.status(404).type('text/plain').send(
+      'This server hands out capability links.\n\n' +
+        'A document lives at /t/{token}/{slug}, and the token in the link IS the\n' +
+        'identity — there is no login. If you are meant to be here, someone has a\n' +
+        'link for you; ask them for it. Nothing is listed from this address by\n' +
+        'design.\n',
+    );
+  });
 
   return app;
 }
 
-/** Start the server with the real model caller. Only called from a CLI entry. */
-export function startServer({ port = process.env.PORT ?? 3000, root } = {}) {
-  const app = createServer({ callModel: createModelCaller(), root });
-  return app.listen(port, () => {
-    console.log(`co-writing server on http://localhost:${port}`);
-    console.log(`local namespace:   http://localhost:${port}${documentAddress(DEFAULT_TOKEN)}`);
+/**
+ * Start the server with the real model caller. Only called from a CLI entry.
+ *
+ * All three knobs come from the environment, because a host assigns them and none
+ * of them can stay baked in:
+ *
+ *   PORT            the platform picks it and tells you.
+ *   HOST            0.0.0.0 to be reachable at all. Defaulting to loopback means
+ *                   a deployment must say so explicitly — and saying so is what
+ *                   turns on F37's refusal of the default token. The safe value is
+ *                   the one you get by not thinking about it.
+ *   DOCUMENTS_ROOT  a mounted volume, so the drafts survive a redeploy. Read in
+ *                   src/namespace.js, which is where the default lives.
+ */
+export function startServer({
+  port = process.env.PORT ?? 3000,
+  host = process.env.HOST ?? '127.0.0.1',
+  root = DOCUMENTS_ROOT,
+} = {}) {
+  const app = createServer({ callModel: createModelCaller(), root, host });
+  return app.listen(port, host, () => {
+    console.log(`co-writing server v${APP_VERSION} on ${host}:${port}`);
+    console.log(`documents root:    ${root}`);
+
+    if (allowsDefaultToken(host)) {
+      console.log(`local namespace:   http://localhost:${port}${documentAddress(DEFAULT_TOKEN)}`);
+      console.log(
+        'the default token is fixed and guessable by design (§0.5, local development).\n' +
+          'Bound to loopback, so nothing outside this machine can reach it.',
+      );
+      return;
+    }
+
     console.log(
-      'the default token is fixed and guessable by design (§0.5, local development).\n' +
-        'Hand out generated tokens before putting this anywhere but localhost.',
+      `bound to ${host}, which is reachable from outside this machine, so the fixed\n` +
+        'development namespace is REFUSED (§0.5, F37). Mint links with:  npm run new-token',
     );
   });
 }

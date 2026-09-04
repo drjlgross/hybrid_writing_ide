@@ -453,6 +453,39 @@ No endpoint lists or reads across namespaces, unchanged.
 
 Export transcript carries context metadata, never file bytes (§4).
 
+**The fixed default token is refused off localhost.** Resolves F37, ratified
+2026-09-04. The default token is guessable by construction: that is exactly what
+makes it useful locally, and exactly what makes `documents/000…0` a world-writable
+namespace the moment this is hosted. So the two facts are bound together in code —
+**when the server is not listening on a loopback address, any request carrying the
+default token is refused with 403 and one line saying why.** Deployed namespaces
+exist only via generated tokens.
+
+Keyed on the BINDING, not on an environment variable. `NODE_ENV=production` is a
+label someone can forget to set; a socket reachable from outside the machine is the
+hazard itself, and it cannot be misdeclared. Local development is unchanged — bound
+to localhost, the default token works as it always has.
+
+Refused, never sanitized and never redirected to a generated namespace, by the same
+rule as an invalid token above: a request that quietly became a different namespace
+is worse than one that failed.
+
+**Two people editing one document at once is accepted, not solved.** Resolves
+chunk-06's F43, ratified 2026-09-04, for v1. A capability token is *shared by
+construction*, so §5's "single local user" stopped being true the moment namespaces
+shipped. Two tabs on one document both load, both edit, and the later commit wins:
+**last Checkpoint wins.**
+
+**The ledger keeps both.** Every commit appends and nothing is ever rewritten
+(§0.3), so both parties' turns are in the history and either draft can be restored
+from it (§4). What is lost is bounded to the uncommitted hand edits sitting in the
+losing tab — real, but recoverable-adjacent, and the alternative is locking or a
+CRDT, both ruled out by §7.
+
+Accepted knowingly rather than left undiscovered: §12's capability disclosure
+carries one sentence about it, because someone handed a link needs to know this
+before they find out by losing a paragraph.
+
 ### 0.6 TipTap is a view, Markdown is authoritative
 Serialization happens at commit boundaries only, never per keystroke. The API key
 stays server-side. No streaming in v1 — whole-draft replacement gains little from it.
@@ -1012,7 +1045,7 @@ the pipeline" — and it needs no detection logic of any kind.
 occurrence of the same kind of correction the model proposes a rule *and* makes the
 correction; on the third and after it keeps making it as a one-off until the rule is
 accepted or dismissed (S11). Paired with silence-decay on model-volunteered
-observations the human ignores (S10). Blocked on F46.
+observations the human ignores (S10). Blocked on F87.
 
 Build the store so the source of a rule — `human` or `proposed` — is a field on the
 rule, not a separate collection. Step 16 then adds a writer and a proposal state, not a
@@ -1025,7 +1058,7 @@ before staging designs candidates against rules nobody has tested.
 
 ## 11. Session continuity
 
-- **K1** A rolling conversational window of recent exchanges, bounded (F44).
+- **K1** A rolling conversational window of recent exchanges, bounded (F85).
 - **K2** The window is discardable on command. **The cold read is a first-class
   operation**, not a session restart: clearing history and asking one open question is
   the highest-hit-rate move in the analyzed corpus.
@@ -1094,6 +1127,11 @@ anyone given a link", and a disclosure someone has to go looking for cannot do t
 job it has: stopping a person from treating a capability URL as private. Step 13 is
 deploy, and real people will be holding real links.
 
+**The same disclosure carries one sentence on concurrency** (§0.5, F43 accepted):
+two people editing one document at the same time is last-Checkpoint-wins. It sits
+here rather than in a warning somewhere because the person who needs it is the
+person being handed the link, at the moment they are handed it.
+
 **Removed:** the Documents panel (creation and switching move to the top row) and
 everything below the horizontal separator — document name, turn count, uncommitted-edits
 row, stored-file link.
@@ -1117,32 +1155,72 @@ No modal, no overlay, no full-screen graphic.
 ## 13. Open items
 
 Existing: **F28** (SDK not adopted; the fetch carries an `AbortSignal.timeout`
-instead — open by choice). **F37** (token decision — flagged before deploy, now step
-14).
+instead — open by choice).
 
-Added 2026-09-02. Renumber upward if any collide with an F-number already used in
-`reports/`.
+**F37 — the fixed default token is guessable, and hosting it exposes one namespace.**
+RESOLVED 2026-09-04, written into §0.5: refused with 403 off localhost. It was the
+deploy step's stated precondition and is no longer open. (F37's own text in
+`reports/chunk-06.md` cites "§9 step 9" for the deploy step; that was the numbering
+of the day, and deploy is now step 13.)
 
-- **F40** Whether derived context — the pattern of building an audited intermediate
+**F43 — two tabs on one document clobber each other.** RESOLVED AS ACCEPTED
+2026-09-04, written into §0.5: last Checkpoint wins, the ledger keeps both, and
+§12's disclosure says so. Not fixed — decided.
+
+Both F-numbers above are `reports/chunk-06.md`'s. See the renumbering note below.
+
+Added 2026-09-02, **renumbered to F81–F88 on 2026-09-04** under this section's own
+rule. As written they were F40–F47, and the first seven collided head-on with
+`reports/chunk-06.md`, which had already used F31 through F46 — so this file's
+"modified-accept" finding and chunk-06's "two tabs clobber each other" were
+different findings wearing the number 43, and the same for 44. The reports hold the
+numbers they were given; this section moved. The eighth did not collide and moved
+anyway, to keep the block readable as one set. **The next free number is F95**:
+F1–F80 are used across `reports/`, F81–F88 are used here, and F89–F94 were raised
+by the deploy-readiness chunk further down this section.
+
+- **F81** Whether derived context — the pattern of building an audited intermediate
   artifact and working from it rather than from sources — is a CoWrite concern at all,
   or stays external and arrives as an uploaded file.
-- **F41** Whether the model's decomposition (§2.2 `segments`) is always shown or only
+- **F82** Whether the model's decomposition (§2.2 `segments`) is always shown or only
   above some segment count.
-- **F42** Whether the human can mark a span "idea layer open" explicitly, or whether it
+- **F83** Whether the human can mark a span "idea layer open" explicitly, or whether it
   must always be inferred from how she writes the prompt. Marking is more reliable and
   is also bookkeeping.
-- **F43** Whether a modified-accept records the human's replacement inside the turn or
+- **F84** Whether a modified-accept records the human's replacement inside the turn or
   as a separate ledger event.
-- **F44** The rolling window's bound: turns, tokens, or checkpoints.
-- **F45** Whether a session can be closed with a marker — "unreviewed under fatigue" —
+- **F85** The rolling window's bound: turns, tokens, or checkpoints.
+- **F86** Whether a session can be closed with a marker — "unreviewed under fatigue" —
   pointing the next session at what needs fresh eyes. The evidence supports the need;
   the no-bookkeeping rule argues against anything requiring effort. An automatic signal
   derived from timestamps and disposition patterns is a third option and is
   speculative.
-- **F46** What "the same kind of correction" means operationally for S11. This is the
+- **F87** What "the same kind of correction" means operationally for S11. This is the
   difference between a useful proposal and a nag, and it is the one genuinely unsolved
   problem in the extension. **Blocks step 16 and nothing earlier.**
-- **F47** Whether Checkpoint's adjacency to Submit is missed once it moves to the top
+Raised by the deploy-readiness chunk, 2026-09-04 (`reports/deploy-readiness.md`):
+
+- **F89** `/` answered Express's default "Cannot GET /" whenever `client/dist` was
+  absent — a fresh clone, or a deploy whose build step failed. FIXED in that chunk
+  (the route is unconditional now). Left here because the second half is open: the
+  test passed in a working tree and failed only in a clone, so `npm test` is not
+  self-evidently hermetic against build state and only the rehearsal checks that.
+- **F90** `npm run build` needs devDependencies, so a host running
+  `npm ci --omit=dev` cannot build. Latent — most Node buildpacks install
+  everything — and the fix is a step-13 decision: install-then-prune, or promote
+  vite to a dependency.
+- **F91** `startServer` now binds `127.0.0.1` rather than every interface. The F37
+  mechanism working as intended, but a silent change to a default: a dev server is
+  no longer reachable from another device without setting `HOST`.
+- **F92** The usage ledger is never rotated and `readUsage` reads the whole file.
+  Irrelevant at this scale, real beyond it. Rotation is a decision nobody needs to
+  make yet.
+- **F93** `/health` is unauthenticated and reports the version, so the version is
+  public on a deployed instance. Deliberate — a probe has no token.
+- **F94** The F43 concurrency sentence lengthens the header paragraph. Watch on a
+  narrow viewport; neither half of it is the half to drop.
+
+- **F88** Whether Checkpoint's adjacency to Submit is missed once it moves to the top
   row. Checkpoint-then-send is a common sequence and the two controls are now far
   apart. Watch in use rather than pre-solving.
 
@@ -1211,7 +1289,9 @@ This state line is maintained by the chunk it describes, per the Operating rules
 **Deploy and staging swapped 2026-09-04, ratified.** Deploy was step 14 and staging
 step 13; they are now 13 and 14. The numbers below are the current order.
 
-13. **Deploy.** Railway with a persistent volume, per §0.5 and §0.6. Resolve F37 first.
+13. **Deploy.** Railway with a persistent volume, per §0.5 and §0.6. F37 is resolved
+    (§0.5: the default token is refused off localhost), as is F43 (accepted:
+    last Checkpoint wins).
     Its precondition — a version worth using exists before a version is hosted — is now
     satisfied evidence rather than a forecast: the interim §2.2 contract is field-proven
     in `reports/chunk-12.md`, which reports all three required live turns passing plus a
@@ -1231,7 +1311,7 @@ step 13; they are now 13 and 14. The numbers below are the current order.
     panel↔editor links. Provisional per §9.
 
 16. **Standing rule proposals.** §10's model-proposed half. Provisional per §10;
-    blocked on F46.
+    blocked on F87.
 
 17. Everything else.
 

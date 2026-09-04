@@ -11,7 +11,11 @@
     "build": "vite build",
     "new-token": "node scripts/new-token.js",
     "live-check": "node scripts/live-check.js",
-    "budget": "node scripts/live-check.js --budget"
+    "budget": "node scripts/live-check.js --budget",
+    "spend-report": "node scripts/spend-report.js"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "dependencies": {
     "@tiptap/core": "^3.29.0",

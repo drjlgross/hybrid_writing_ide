@@ -156,6 +156,19 @@ body {
   max-width: 62ch;
 }
 
+/*
+ * The version, for a bug report (§ Versioning). Quiet on purpose: it is read
+ * once, at the moment something has gone wrong, and it should not compete with
+ * the draft on every other occasion. Selectable, because the point is to paste
+ * it into a message.
+ */
+.colophon {
+  padding: 0 2rem 1.5rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 22rem;
