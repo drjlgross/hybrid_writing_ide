@@ -837,6 +837,8 @@ and §0.9 together.
         "schema_version": 1,
         "slug": "...",
         "exported_at": "ISO 8601",
+        "context": [ ... context METADATA per §0.5, never file bytes ... ],
+        "rules": [ ... the standing rules per §10, with their scopes ... ],
         "turns": [ ... the ledger verbatim, per §3 ... ]
       }
 
@@ -847,7 +849,24 @@ and §0.9 together.
   thing a later reader ever sees is those bytes. `slug` because a file named
   `draft-transcript.json` in a folder of them is not self-identifying once it is
   out of the app; `exported_at` because §11's K4 turns on reconstructing when
-  something was looked at. `turns` is the ledger verbatim — full snapshots per §0.4,
+  something was looked at.
+
+  `context` and `rules` were ADDED 2026-09-05, correcting this block rather than
+  the code. They were absent because the shape was pinned in chunk 11 and context
+  and standing rules arrived in chunk 12 — so the export had been carrying them,
+  correctly, against a spec that did not mention them. §0.5 already required it
+  ("Export transcript carries context metadata, never file bytes"), and a
+  transcript whose turns carry `context_ref` and `rules_ref` but no table to
+  resolve those ids against is a dangling reference the moment it leaves the app.
+  Metadata only, on §0.5's terms: the id, filename, description, type and
+  extraction status, never the bytes. A 73KB context file must not become 73KB of
+  every export.
+
+  This is the same class F49 was raised for — a shape drifting from the spec that
+  pins it — caught the other way round, in the export rather than in the code.
+  Both halves are now asserted against the FILE.
+
+  `turns` is the ledger verbatim — full snapshots per §0.4,
   no diffs, since diffs are computed from snapshots and never stored (§5). The
   model's speech goes with it, because the note is a field on the turn (§0.7),
   which is what §9's S13 means by the conversation having the ledger's durability.
@@ -1267,11 +1286,18 @@ not by number, so the reference survives every extension.
 Entries are pointers. Anything a chunk needs to know lives in the section it names;
 what belongs here is *where in the sequence* and *why there*.
 
-Steps 1–12 are built, tested, committed, and live-verified, through the chunk-12
+Steps 1–13 are built, tested, committed, and live-verified, through the chunk-13
 commit: canonicalize, round-trip, storage, turn model and Checkpoint, AI endpoint,
 editor and panel, clipboard fixture, history view, the spec extension, the §12 UI
-cleanup, model speech, and context files plus human-written standing rules. The detail
-is in git and in `reports/`.
+cleanup, model speech, context files plus human-written standing rules, and deploy.
+The detail is in git and in `reports/`.
+
+**The app is deployed and in real use.** Step 13 is done, and the version is
+`0.1.0` from the chunk-13 commit per the Versioning rule. `reports/chunk-13.md`
+walks an 11-turn session worked on the hosted instance — three speech-only turns,
+context attached once and carried across two turns, and the dialect constraint
+holding against a direct request for a heading. Step 14 therefore ships to people
+already holding links, which is the cost the swap priced in.
 
 This state line is maintained by the chunk it describes, per the Operating rules.
 

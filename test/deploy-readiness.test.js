@@ -15,9 +15,11 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { DEFAULT_SLUG, DEFAULT_TOKEN } from '../src/addressing.js';
@@ -28,6 +30,11 @@ import { generateToken } from '../src/namespace.js';
 import { APP_VERSION } from '../src/version.js';
 
 // ── harness ───────────────────────────────────────────────────────────────────
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Kept in step with `scripts/new-token.js` deliberately: see the group 6 comment. */
+const DEPLOY_ORIGIN = 'https://hybridwritingide-production.up.railway.app';
 
 const roots = [];
 function freshRoot() {
@@ -520,4 +527,65 @@ test('a generic failure keeps the generic message — no false budget claim', as
   assert.doesNotMatch(latest.error, new RegExp(BUDGET_EXHAUSTED_MESSAGE.slice(0, 20)));
   assert.match(latest.error, /529/, 'the real failure is still reported');
   assert.match(latest.error, /exactly as you left it/, 'with the draft guarantee');
+});
+
+// ── 6. the minted link is the link that gets handed over ─────────────────────
+//
+// `scripts/new-token.js` had no coverage at all until this chunk, and it is the
+// one place a capability URL is composed for a human to copy. The hazard is not
+// that it crashes — it is that it prints something subtly wrong and the mistake
+// surfaces as a stranger's 404, or worse as a valid-looking token naming an empty
+// namespace nobody can find again.
+
+/** Run the token script and return its stdout. */
+function mintToken(...args) {
+  return execFileSync(process.execPath, [join(REPO_ROOT, 'scripts/new-token.js'), ...args], {
+    encoding: 'utf8',
+  });
+}
+
+test('§0.5 minting prints the deployed link beside the local one, same token in both', () => {
+  const out = mintToken();
+
+  const local = out.match(/^local {3}: (\S+)$/m);
+  const deployed = out.match(/^deployed: (\S+)$/m);
+  assert.ok(local, 'the local link is still printed');
+  assert.ok(deployed, 'the deployed link is printed too — it is the one handed to a person');
+
+  assert.match(deployed[1], /^https:\/\//, 'a capability link off this machine is https');
+  assert.ok(
+    deployed[1].startsWith(DEPLOY_ORIGIN),
+    `the deployed link points at the deployment, got ${deployed[1]}`,
+  );
+
+  // The two links must name the SAME namespace. Composing the URL twice is
+  // exactly where they could drift, and a drifted pair is undetectable by eye.
+  const tokenOf = (url) => url.match(/\/t\/([^/]+)\//)?.[1];
+  assert.match(tokenOf(local[1]), /^[0-9a-f]{32}$/, '§0.5: 32 hex characters, nothing else');
+  assert.equal(tokenOf(deployed[1]), tokenOf(local[1]), 'one token, two hosts');
+
+  assert.ok(local[1].endsWith(`/${DEFAULT_SLUG}`), 'and both land on the default slug');
+  assert.ok(deployed[1].endsWith(`/${DEFAULT_SLUG}`));
+});
+
+test('§0.5 every mint is a different token, and the disclosure always rides along', () => {
+  const first = mintToken();
+  const second = mintToken();
+  const tokenOf = (out) => out.match(/^token: ([0-9a-f]{32})$/m)?.[1];
+
+  assert.ok(tokenOf(first) && tokenOf(second));
+  assert.notEqual(tokenOf(first), tokenOf(second), 'crypto-random, not a counter');
+
+  // §0.5 requires a namespace "be described that way to anyone given a link", and
+  // the person handing it over is the one who needs the words.
+  assert.match(first, /full read and write access/);
+  assert.match(first, /not access control/);
+});
+
+test('--base overrides the deployment, for a host that is neither of the two', () => {
+  const out = mintToken('--base', 'https://staging.example.app/');
+
+  assert.match(out, /^link {4}: https:\/\/staging\.example\.app\/t\/[0-9a-f]{32}\/draft$/m);
+  assert.doesNotMatch(out, /^deployed:/m, 'an explicit base replaces the default pair');
+  assert.doesNotMatch(out, /staging\.example\.app\/\/t\//, 'the trailing slash is stripped, not doubled');
 });
