@@ -168,16 +168,50 @@ test('every request carries an abort signal with a timeout', async () => {
   assert.ok(REQUEST_TIMEOUT_MS > 0);
 });
 
-test('the timeout actually fires, and says the draft is unchanged', async () => {
-  // A fetch that never resolves on its own: only the signal can end it. This is
-  // the case the timeout exists for — a hung connection holding the editor
-  // read-only with no error and no way back except a reload.
-  const fetchImpl = (url, init) =>
+/**
+ * A fetch that never answers on its own: only the abort signal can end it. This
+ * is the case the timeout exists for — a hung connection holding the editor
+ * read-only with no error and no way back except a reload.
+ *
+ * It also holds a REF'D HANDLE open for as long as the request is outstanding,
+ * and that is not decoration. `AbortSignal.timeout()` is unref'd, and a bare
+ * pending promise is not a handle, so a stub that holds nothing lets the event
+ * loop drain with the request still in flight — the promise then settles NEVER,
+ * not late, and node:test cancels this test and every test after it in the file.
+ * A real in-flight fetch holds a live socket, which is exactly what the interval
+ * stands in for. With it, the abort is the only thing that can happen next, at
+ * any clock speed and on any runtime.
+ */
+function hangingFetch() {
+  return (url, init) =>
     new Promise((resolve, reject) => {
-      init.signal.addEventListener('abort', () => reject(init.signal.reason));
-    });
+      const fail = () => reject(init.signal.reason);
+      if (init.signal.aborted) return fail();
 
-  const callModel = createModelCaller({ apiKey: 'k', fetchImpl, timeoutMs: 30 });
+      const socket = setInterval(() => {}, 1000);
+      init.signal.addEventListener(
+        'abort',
+        () => {
+          clearInterval(socket);
+          fail();
+        },
+        { once: true }, // the listener is removed when it fires; nothing outlives the request
+      );
+    });
+}
+
+// The two halves of the timeout are tested apart, because only one of them needs
+// a clock at all and the message contract should not be waiting on one.
+
+test('a timeout is reported as prose, saying the draft is unchanged', async () => {
+  // No timer anywhere: the abort has already happened by construction, and what
+  // is under test is purely how `TimeoutError` is translated for a human.
+  const callModel = createModelCaller({
+    apiKey: 'k',
+    fetchImpl: async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    },
+  });
 
   await assert.rejects(
     () => callModel({ draft: 'a draft\n', prompt: 'p' }),
@@ -185,6 +219,24 @@ test('the timeout actually fires, and says the draft is unchanged', async () => 
       assert.match(error.message, /did not respond within/);
       assert.match(error.message, /draft is unchanged/, 'the human has to be told their text is safe');
       assert.doesNotMatch(error.message, /TimeoutError/, 'a raw DOMException reads as a bug in the app');
+      return true;
+    },
+  );
+});
+
+test('the timeout actually fires and aborts a request that never answers', { timeout: 5_000 }, async () => {
+  // Whether the signal is WIRED to the fetch, which is the half that cannot be
+  // proved without letting a real timer fire. `timeoutMs` is 30 to keep the suite
+  // quick, and nothing here depends on that number: the stub holds the loop open
+  // until the abort arrives, so a slower machine makes this test slower and never
+  // makes it flaky. The 5s `timeout` is a backstop that turns a regression into a
+  // failure instead of a hang — the passing path never approaches it.
+  const callModel = createModelCaller({ apiKey: 'k', fetchImpl: hangingFetch(), timeoutMs: 30 });
+
+  await assert.rejects(
+    () => callModel({ draft: 'a draft\n', prompt: 'p' }),
+    (error) => {
+      assert.match(error.message, /did not respond within/, 'the abort must surface as the timeout');
       return true;
     },
   );

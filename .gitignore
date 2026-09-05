@@ -6,3 +6,6 @@ documents/
 .env
 client/dist/
 .spend.json
+
+# operator notes and token ledger — local only, never committed
+notes/
