@@ -1,4 +1,35 @@
-/* Plain CSS, no framework — nothing here is a dependency. */
+/* Plain CSS, no framework — nothing here is a dependency.
+
+   ── the two faces (self-hosted, never a runtime CDN) ─────────────────────────
+
+   Allison for the WordWright wordmark, Courier Prime for the subtitle and the
+   version line. Both woff2 files sit in `fonts/` beside this stylesheet with
+   their OFL licenses; `fonts/README.md` says which subset each one is and why.
+
+   Self-hosted rather than pulled from fonts.gstatic.com at page load because a
+   CDN font is a request every reader of a capability link makes to a third
+   party, and index.html already goes out of its way not to leak that link in a
+   referrer header. It is also one fewer thing that can be slow or absent on a
+   deployed instance.
+
+   `font-display: swap` on both: the fallback stacks below are legible on their
+   own, so painting text immediately beats holding the masthead blank. */
+
+@font-face {
+  font-family: 'Allison';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/allison-latin-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/courier-prime-latin-400.woff2') format('woff2');
+}
 
 :root {
   --ink: #1c1a17;
@@ -31,6 +62,14 @@
   --lilac-edge: #8f7fb8;
   --lilac-deep: #6f5c9a;
 
+  /* The wordmark and the two places Courier Prime speaks. Declared once, as
+     tokens, so the fallback stacks cannot drift apart between the subtitle and
+     the version line — and so a failed font load degrades to something legible
+     rather than to the body serif, which would make the wordmark look like a
+     paragraph that lost its styling. */
+  --wordmark-font: 'Allison', 'Snell Roundhand', 'Brush Script MT', cursive;
+  --mono-font: 'Courier Prime', ui-monospace, 'Courier New', monospace;
+
   color-scheme: light;
 }
 
@@ -57,10 +96,46 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
+/* The wordmark. Allison is a very light script — at the 1.1rem the old title
+   sat at it would be a grey smudge — so it opens at 72px and never goes below
+   48px. `line-height: 1` because a script face with long descenders otherwise
+   leaves a hole between it and the subtitle. */
 .masthead h1 {
-  margin: 0 0 0.7rem;
-  font-size: 1.1rem;
-  letter-spacing: 0.02em;
+  margin: 0;
+  /* Centred on the page, while the top row and the capability disclosure below
+     stay left-aligned — the wordmark is a masthead, the controls are a toolbar,
+     and they are not the same kind of thing. The masthead's left and right
+     padding are equal, so this centres on the viewport and not merely inside a
+     lopsided box. */
+  text-align: center;
+  font-family: var(--wordmark-font);
+  /* 72px on the desktop layout, and the clamp's LOWER bound is 48px, so the
+     sizing floor holds at every breakpoint without a media query to keep in
+     sync — 9vw only ever chooses between the two ends. */
+  font-size: clamp(3rem, 9vw, 4.5rem);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+/* Clearly subordinate (the wordmark is 72px, this is 13px) and set in the mono
+   face, which is what makes it read as a strapline rather than as the first
+   line of the page's prose. */
+.masthead .wordmark-subtitle {
+  margin: 0.15rem 0 0.75rem;
+  /* Centred with the wordmark it sits under. Declared here rather than inherited
+     from a centred wrapper so the top row underneath cannot pick it up. */
+  text-align: center;
+  font-family: var(--mono-font);
+  font-weight: 400;
+  /* 18px, up from the 13px this shipped at — three steps up a modest scale, and
+     the point at which it stops being something you squint at. Still a quarter
+     the wordmark's 72px and comfortably subordinate; going further would put it
+     level with the body serif's 16px and make it read as a heading rather than
+     as a strapline. */
+  font-size: 1.125rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
 }
 
 /* ── the top row (§12) ───────────────────────────────────────────────────── */
@@ -165,6 +240,7 @@ body {
 .colophon {
   padding: 0 2rem 1.5rem;
   color: var(--muted);
+  font-family: var(--mono-font);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }

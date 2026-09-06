@@ -33,8 +33,17 @@ import { APP_VERSION } from '../src/version.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Kept in step with `scripts/new-token.js` deliberately: see the group 6 comment. */
-const DEPLOY_ORIGIN = 'https://hybridwritingide-production.up.railway.app';
+/**
+ * Kept in step with `scripts/new-token.js` deliberately: see the group 6 comment.
+ *
+ * Written out as a literal rather than imported from the script, on purpose. The
+ * script has no exports — it mints a token as a side effect of being loaded — but
+ * even if it did, importing the constant would make this assert that the script
+ * agrees with itself. A hostname is the one thing here a human has to get right,
+ * so it is typed twice and the test fails when the two copies disagree.
+ */
+const SEND_ORIGIN = 'https://wordwright.ink';
+const LOCAL_ORIGIN = 'http://localhost:3000';
 
 const roots = [];
 function freshRoot() {
@@ -537,6 +546,9 @@ test('a generic failure keeps the generic message — no false budget claim', as
 // surfaces as a stranger's 404, or worse as a valid-looking token naming an empty
 // namespace nobody can find again.
 
+/** The token out of a `/t/{token}/{slug}` URL, or undefined if it is not one. */
+const tokenOf = (url) => url.match(/\/t\/([^/]+)\//)?.[1];
+
 /** Run the token script and return its stdout. */
 function mintToken(...args) {
   return execFileSync(process.execPath, [join(REPO_ROOT, 'scripts/new-token.js'), ...args], {
@@ -544,37 +556,73 @@ function mintToken(...args) {
   });
 }
 
-test('§0.5 minting prints the deployed link beside the local one, same token in both', () => {
+test('§0.5 minting prints one full link per host, same token in every one', () => {
   const out = mintToken();
 
-  const local = out.match(/^local {3}: (\S+)$/m);
-  const deployed = out.match(/^deployed: (\S+)$/m);
+  const local = out.match(/^local: +(\S+)/m);
+  const ink = out.match(/^ink: +(\S+)/m);
   assert.ok(local, 'the local link is still printed');
-  assert.ok(deployed, 'the deployed link is printed too — it is the one handed to a person');
+  assert.ok(ink, 'the ink link is printed too — it is the one handed to a person');
 
-  assert.match(deployed[1], /^https:\/\//, 'a capability link off this machine is https');
-  assert.ok(
-    deployed[1].startsWith(DEPLOY_ORIGIN),
-    `the deployed link points at the deployment, got ${deployed[1]}`,
-  );
+  assert.equal(local[1], `${LOCAL_ORIGIN}/t/${tokenOf(local[1])}/${DEFAULT_SLUG}`);
+  assert.equal(ink[1], `${SEND_ORIGIN}/t/${tokenOf(ink[1])}/${DEFAULT_SLUG}`);
 
-  // The two links must name the SAME namespace. Composing the URL twice is
+  // Asserted whole rather than by prefix: a link is copied entire, so a doubled
+  // slash or a missing slug is the same failure as a wrong host, and a
+  // `startsWith` check cannot see either of them.
+  assert.match(ink[1], /^https:\/\//, 'a capability link off this machine is https');
+
+  // The links must name the SAME namespace. Composing the URL once per host is
   // exactly where they could drift, and a drifted pair is undetectable by eye.
-  const tokenOf = (url) => url.match(/\/t\/([^/]+)\//)?.[1];
   assert.match(tokenOf(local[1]), /^[0-9a-f]{32}$/, '§0.5: 32 hex characters, nothing else');
-  assert.equal(tokenOf(deployed[1]), tokenOf(local[1]), 'one token, two hosts');
+  assert.equal(tokenOf(ink[1]), tokenOf(local[1]), 'one token, two hosts');
+});
 
-  assert.ok(local[1].endsWith(`/${DEFAULT_SLUG}`), 'and both land on the default slug');
-  assert.ok(deployed[1].endsWith(`/${DEFAULT_SLUG}`));
+test('the token stands alone on its own line, ahead of every link', () => {
+  // The line anything parsing this output is looking for, in the shape it has
+  // always had. Anchored at both ends: a link appended to this line would still
+  // satisfy a loose match and would break every such reader.
+  const out = mintToken();
+  const line = out.split('\n').find((l) => l.startsWith('token:'));
+
+  assert.match(line, /^token: [0-9a-f]{32}$/, 'the token line carries the token and nothing else');
+  assert.ok(
+    out.indexOf(line) < out.indexOf('local:'),
+    'and it comes first — the links are the elaboration, not the answer',
+  );
+});
+
+test('the sending link is last and says so; the local one carries no such mark', () => {
+  // Both halves matter. Last, because a terminal leaves the final line nearest
+  // the cursor and that is the one a hand reaches for; marked, because "the
+  // second URL" is not a thing anyone remembers at the moment of handing a link
+  // over. A mark on the wrong line would be worse than no mark at all.
+  const out = mintToken();
+  const links = out.split('\n').filter((l) => /^(local|ink): /.test(l));
+
+  assert.equal(links.length, 2, 'exactly the two hosts, no more');
+  assert.match(links[0], /^local: /, 'local first');
+  assert.match(links[1], /^ink: /, 'ink last');
+
+  assert.match(links[1], /← send this one/, 'the ink link is marked as the one to send');
+  assert.doesNotMatch(links[0], /← send/, 'and the local one is not');
+});
+
+test('the two links align, so a wrong one is visible as a ragged line', () => {
+  const out = mintToken();
+  const links = out.split('\n').filter((l) => /^(local|ink): /.test(l));
+  const starts = links.map((l) => l.indexOf('http'));
+
+  assert.equal(starts[0], starts[1], 'the URLs start at the same column');
 });
 
 test('§0.5 every mint is a different token, and the disclosure always rides along', () => {
   const first = mintToken();
   const second = mintToken();
-  const tokenOf = (out) => out.match(/^token: ([0-9a-f]{32})$/m)?.[1];
+  const tokenLineOf = (out) => out.match(/^token: ([0-9a-f]{32})$/m)?.[1];
 
-  assert.ok(tokenOf(first) && tokenOf(second));
-  assert.notEqual(tokenOf(first), tokenOf(second), 'crypto-random, not a counter');
+  assert.ok(tokenLineOf(first) && tokenLineOf(second));
+  assert.notEqual(tokenLineOf(first), tokenLineOf(second), 'crypto-random, not a counter');
 
   // §0.5 requires a namespace "be described that way to anyone given a link", and
   // the person handing it over is the one who needs the words.
@@ -582,10 +630,12 @@ test('§0.5 every mint is a different token, and the disclosure always rides alo
   assert.match(first, /not access control/);
 });
 
-test('--base overrides the deployment, for a host that is neither of the two', () => {
+test('--base overrides the host list, for a host that is neither of the two', () => {
   const out = mintToken('--base', 'https://staging.example.app/');
 
-  assert.match(out, /^link {4}: https:\/\/staging\.example\.app\/t\/[0-9a-f]{32}\/draft$/m);
-  assert.doesNotMatch(out, /^deployed:/m, 'an explicit base replaces the default pair');
+  assert.match(out, /^link: https:\/\/staging\.example\.app\/t\/[0-9a-f]{32}\/draft$/m);
+  assert.doesNotMatch(out, /^ink: /m, 'an explicit base replaces the whole list');
+  assert.doesNotMatch(out, /^local: /m);
+  assert.doesNotMatch(out, /← send/, 'nothing to disambiguate when there is one link');
   assert.doesNotMatch(out, /staging\.example\.app\/\/t\//, 'the trailing slash is stripped, not doubled');
 });

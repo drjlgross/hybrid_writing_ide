@@ -7,6 +7,18 @@ file exists, now that the tool is deployed and someone else may be holding a lin
 
 Entries are newest first.
 
+## 0.1.1 — 2026-09-06 (behavior change)
+
+The product has a name: WordWright. The masthead is the wordmark in Allison over
+the subtitle "Enabling Human Judgment" in Courier Prime, both centred, both fonts
+self-hosted with their OFL licenses rather than fetched from a CDN; the browser
+tab and the version line follow. Anyone holding a link will see a different page
+header than they did yesterday, which is what the tag is for.
+
+Also in this commit: `scripts/new-token.js` mints links at `wordwright.ink`
+instead of the Railway hostname, labelled `local:` and `ink:` with the sending
+link last and marked.
+
 ## 0.1.0 — 2026-09-05
 
 First deploy. The tool is hosted on Railway with a persistent volume and reachable

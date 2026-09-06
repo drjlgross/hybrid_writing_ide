@@ -274,7 +274,12 @@ export function App({
 
   return h('div', { className: `app${state.locked ? ' locked' : ''}` }, [
     h('header', { key: 'masthead', className: 'masthead' }, [
-      h('h1', { key: 'title' }, 'One draft, two hands'),
+      // The product name, and the one line that says what it is for. Two
+      // elements rather than one so the two faces (§ the stylesheet's
+      // --wordmark-font and --mono-font) can be declared separately and the
+      // subtitle can be read by itself.
+      h('h1', { key: 'title' }, 'WordWright'),
+      h('p', { key: 'subtitle', className: 'wordmark-subtitle' }, 'Enabling Human Judgment'),
       topBar,
 
       // §0.5's capability disclosure, ON THE SURFACE (F51, resolved chunk 11).
@@ -350,7 +355,12 @@ export function App({
     // and for no other moment. A report that cannot name the version it came from
     // costs a round trip to establish what was running.
     h('footer', { key: 'footer', className: 'colophon' }, [
-      h('span', { key: 'v' }, version ? `version ${version}` : 'version unavailable'),
+      // Named, not a bare number: a version pasted into a bug report has to say
+      // what it is the version OF, and this string is the whole of what the
+      // reporter copies. The number itself still comes from /health — see the
+      // `version` state above — so it reports the running deployment rather than
+      // whatever was baked into this bundle at build time.
+      h('span', { key: 'v' }, version ? `WordWright v${version}` : 'WordWright — version unavailable'),
     ]),
   ]);
 }
