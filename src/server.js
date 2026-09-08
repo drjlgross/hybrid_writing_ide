@@ -41,9 +41,36 @@ import {
 } from './storage.js';
 import { checkpoint, commitHumanTurn, getTurn, restoreToTurn } from './turns.js';
 import { recordUsage } from './usage-ledger.js';
+import {
+  CLAIM_LIMIT,
+  claimNamespace,
+  clientAddress,
+  createClaimLimiter,
+  validateClaim,
+} from './claims.js';
 import { APP_VERSION } from './version.js';
 
 const CLIENT_DIST = fileURLToPath(new URL('../client/dist/', import.meta.url));
+
+/**
+ * What `/` says when there is no client bundle to serve it.
+ *
+ * A CONSTANT rather than a string literal inside the route, so it can be asserted
+ * whatever the tree's build state. Reached only in a fresh clone or a deploy whose
+ * build step failed, which means in a developer's built tree it is never exercised
+ * and a test that fetched `/` would be checking the landing page instead — that
+ * asymmetry is how F89 got in, and a mutation that put a token in here went
+ * uncaught until this constant existed.
+ *
+ * It hands out no token, on any binding (§0.5).
+ */
+export const NO_BUILD_NOTICE =
+  'WordWright is not built here yet.\n\n' +
+  'This address serves the landing page, and the client bundle is missing —\n' +
+  'run `npx vite build`, or `npm run dev` to serve the client directly.\n\n' +
+  'A document lives at /t/{token}/{slug}, and the token in the link IS the\n' +
+  'identity: there is no login. If you are meant to be here, someone has a\n' +
+  'link for you. Nothing is listed from this address by design.\n';
 
 /**
  * @param {{callModel: Function, root?: string, host?: string}} options
@@ -85,6 +112,73 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT, host = '127.0.0
    */
   app.get('/health', (req, res) => {
     res.json({ status: 'ok', version: APP_VERSION });
+  });
+
+  // ── the public front door (§12b) ────────────────────────────────────────────
+  //
+  // The ONE endpoint that needs no token, because its whole job is handing one
+  // out. It is under `/api/public/` rather than `/api/t/…` so that separation is
+  // visible in the address: everything namespaced hangs off a token, and this
+  // does not.
+  //
+  // The limiter is created per server, so tests get a fresh one and two processes
+  // do not share state. In-memory and per-process is the whole design — see the
+  // friction note in src/claims.js.
+  const claimLimiter = createClaimLimiter();
+
+  app.post('/api/public/claim', (req, res) => {
+    const address = clientAddress(req);
+
+    const gate = claimLimiter.check(address);
+    if (!gate.allowed) {
+      // Calm, one line, and it says when rather than only that. `Retry-After` is
+      // the same number in the header a machine reads.
+      res.set('Retry-After', String(gate.retryAfterSeconds));
+      res.status(429).json({
+        error:
+          `That is ${CLAIM_LIMIT} sign-ups from this connection in the last hour. ` +
+          'Wait a little and try again.',
+        rate_limited: true,
+        retry_after_seconds: gate.retryAfterSeconds,
+      });
+      return;
+    }
+
+    const valid = validateClaim(req.body ?? {});
+    if (!valid.ok) {
+      res.status(400).json({ error: valid.error, invalid_input: true });
+      return;
+    }
+
+    let claim;
+    try {
+      claim = claimNamespace({ name: valid.name, email: valid.email, root });
+    } catch (error) {
+      // Minting or writing the namespace failed. The visitor gets nothing rather
+      // than a dead link, and the operator gets the reason in the log.
+      console.error(`claim failed: ${error?.message ?? error}`);
+      res.status(500).json({
+        error: 'Something went wrong making your workspace. Nothing was saved — please try again.',
+      });
+      return;
+    }
+
+    // Counted here rather than at the gate: the limit is five CLAIMS an hour, and
+    // a mistyped email or a failed mint created nothing to abuse. See the note on
+    // `record` in src/claims.js.
+    claimLimiter.record(address);
+
+    // The registry write is not allowed to fail the claim (src/claims.js). A
+    // swallowed failure is the operator's problem and is reported here, never to
+    // the visitor, whose namespace is real either way.
+    if (!claim.registry.written) {
+      console.error(
+        `claim registry write failed for ${valid.email}: ${claim.registry.error}. ` +
+          'The namespace exists and the visitor has the link; this row is lost.',
+      );
+    }
+
+    res.status(201).json({ token: claim.token, address: claim.address, slug: claim.slug });
   });
 
   // ── namespace resolution ──────────────────────────────────────────────────────
@@ -565,34 +659,31 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT, host = '127.0.0
   }
 
   /**
-   * `/` is a signpost, and what it points at depends on the binding.
+   * `/` is the landing page (§12b) — and this route is the FALLBACK for when there
+   * is no landing page to serve.
    *
-   * Locally it redirects into the development namespace, which is the whole
-   * convenience of a fixed default token. On a deployment that same redirect
-   * would land on the 403 F37 exists to produce — a dead end reached by
-   * following the app's own link, which is worse than no link at all. So there
-   * it says what kind of thing this is and stops.
+   * The page itself comes out of the SPA middleware above, because `/` is now a
+   * client path (`isClientPath` in src/addressing.js). This route is reached only
+   * when `client/dist` does not exist: a fresh clone, or a deploy whose build step
+   * failed. It stays MOUNTED UNCONDITIONALLY for exactly that reason — inside the
+   * `existsSync` block the behaviour depended on build state, and `/` answered
+   * with Express's default "Cannot GET /", the least informative page available,
+   * at the exact moment something needs explaining (F89, found by the fresh-clone
+   * rehearsal).
    *
-   * MOUNTED WHETHER OR NOT THE CLIENT IS BUILT, deliberately, and this is not
-   * tidiness. Inside the `existsSync` block above, the route's behaviour depended
-   * on build state: a fresh clone, or a deploy whose build step failed, answered
-   * `/` with Express's default "Cannot GET /" — the least informative page
-   * available, served at the exact moment something needs explaining. The
-   * explanation is true with or without a bundle. Found by the fresh-clone
-   * rehearsal, where a test that passed in a developer's tree failed in a clone.
+   * CHUNK 15 REMOVED THE LOCAL REDIRECT into the development namespace. `/` now
+   * behaves identically on every binding, which is what makes the landing page
+   * testable in the place it is developed — a front door that only appears in
+   * production is a front door nobody looks at. The convenience it replaced has
+   * not disappeared: `startServer` prints the development namespace's URL on every
+   * start.
+   *
+   * It still hands out no token, on any binding. §0.5 says nothing enumerates
+   * namespaces, and the page a stranger is most likely to reach is the last place
+   * to make an exception.
    */
   app.get('/', (req, res) => {
-    if (defaultTokenAllowed) {
-      res.redirect(documentAddress(DEFAULT_TOKEN));
-      return;
-    }
-    res.status(404).type('text/plain').send(
-      'This server hands out capability links.\n\n' +
-        'A document lives at /t/{token}/{slug}, and the token in the link IS the\n' +
-        'identity — there is no login. If you are meant to be here, someone has a\n' +
-        'link for you; ask them for it. Nothing is listed from this address by\n' +
-        'design.\n',
-    );
+    res.status(503).type('text/plain').send(NO_BUILD_NOTICE);
   });
 
   return app;

@@ -36,6 +36,22 @@ Every report contains:
 - anything in the spec that was wrong or underspecified
 - what you did NOT verify, named as such
 
+### Report naming
+
+A report is `reports/chunk-NN.md` for work that is a step in the Build order, or
+`reports/mini-<name>.md` for deliberate out-of-band work. There is no third form.
+
+`NN` is the step's number in the Build order **as it stands after the work is
+ratified**. Inserting a step renumbers the ones below it, and the reports keep the
+numbers they were written under — so the shelf and the order agree on what step 15
+is, while `reports/chunk-14.md` continues to describe the export viewer whatever
+happens above it. The Build order's own note records each renumbering; that note is
+how an older report's number is read.
+
+A `mini-` report is for work that was never a step: a rebrand, a one-file fix, a
+piece of tooling. It carries no number precisely because it has no place in the
+sequence, and giving it one would imply the order moved when it did not.
+
 A chunk is not done until the Build order section's state line names it. Updating that
 line is part of the chunk's definition of done, alongside the report — the section whose
 whole job is saying where in the process we are is worthless the moment it lags reality,
@@ -1066,7 +1082,7 @@ Rules are individually revocable and visible in one place. This is the whole fea
 for a human who knows what her rules are — "no em-dashes," "open on the biology, not
 the pipeline" — and it needs no detection logic of any kind.
 
-**Model-proposed rules (step 17, provisional).** The third route in: on the second
+**Model-proposed rules (step 18, provisional).** The third route in: on the second
 occurrence of the same kind of correction the model proposes a rule *and* makes the
 correction; on the third and after it keeps making it as a one-off until the rule is
 accepted or dismissed (S11). Paired with silence-decay on model-volunteered
@@ -1099,15 +1115,65 @@ before staging designs candidates against rules nobody has tested.
 
 The division is load-bearing: **speech lives in the panel, edits live in the draft.**
 
-**Top row**, lilac buttons, in this order:
-Show/hide history · **document name** (opens a switcher) · **+ New document** ·
-**Export transcript** · **Checkpoint**.
+**Top row**, lilac controls, in this order:
+**document name** (opens a switcher) · **+ New Document** · **Export Transcript** ·
+**View WordWright Doc**.
+
+**Button labels are Title Case**, everywhere: the top row, the panel, the history's
+per-turn controls, and the landing and success pages. The document name is not a
+label and is exempt — it is a slug the human typed, which §0.5 lowercases.
+
+**Two controls left this row in chunk 15's layout pass**, each to sit beside what
+it acts on rather than in a row of everything:
+
+- **Show/Hide History moved to the History section's own heading**, immediately to
+  the right of the word History. It carries the turn count again — `Hide History
+  (12)` — which resolves F50. Two things follow, both load-bearing: the history's
+  HEADING always renders and only the log collapses, because a toggle inside the
+  thing it toggles would vanish with it; and the count lives on the control,
+  because the "N turns, newest first" line is part of what collapses, so hidden,
+  the button is the only thing left saying how much record there is.
+- **Checkpoint moved to the editor's bottom-right**, parallel to the Prompt box's
+  Submit and the rules box's Add: each surface's commit action at its own
+  bottom-right, in the same green. It sits under the editor box and above the rule
+  that opens the history, and it does **not** float — see Button semantics below.
+  **The uncommitted-edits signal travels with it and is visible whenever the button
+  is**: §12 removed the status row that used to carry it, so if the button did not
+  say it, nothing would. On green the marker is white, because it has to be legible
+  against whatever it sits on.
+
+**View WordWright Doc** was added in chunk 15 and opens §12a's viewer in a NEW TAB.
+The new tab is the requirement, not a preference: hand edits are uncommitted until
+Checkpoint (§3), so navigating away in the same tab would silently discard whatever
+is typed and not yet ratified — the loss the dirty marker on Checkpoint exists to
+warn about. It is an anchor rather than a button, because it goes somewhere and
+middle-click and cmd-click should work; it wears the same lilac treatment, since
+§12's split is about what a control DOES and this is navigation. It is shown even
+when the address names no document, being global. Its label is set in the interface
+face, not Allison: §12b's wordmark rule covers the landing and success pages, and a
+script face inside a small control costs legibility for consistency nobody asked
+for.
 
 Checkpoint carries the uncommitted-edits signal in the button itself — marked when hand
 edits are unratified, quiet when clean. That is why the separate status row can go
 without losing anything load-bearing.
 
 **Left:** the editor.
+
+**The editor is sized so the history is on screen at first paint.** The heading, its
+count, and the top of the newest turn are visible without scrolling. This is not
+cosmetic: the record is the feature nobody arrives knowing about, and a layout that
+puts it below the fold makes discovering it something you have to already want.
+
+The mechanism is a CAP, not just a floor — `max-height` with `overflow-y: auto`, so
+the editor scrolls inside itself. A minimum height alone does nothing on a draft
+with text in it, because the box is as tall as its content; on any document anyone
+has actually written the history would go straight back under the fold. The cost is
+a second scroll region on the page, accepted deliberately. Both bounds are
+`calc(100vh - <length>)` under a `max()` floor: what sits above and below the editor
+is fixed furniture that does not scale with the viewport, so it comes off as a
+length, and the floor keeps a usable writing surface on a short screen rather than
+spending it all on the record.
 
 **Right column**, three boxes, same paper treatment, top to bottom.
 
@@ -1161,10 +1227,38 @@ person being handed the link, at the moment they are handed it.
 everything below the horizontal separator — document name, turn count, uncommitted-edits
 row, stored-file link.
 
-**Button semantics:** lilac = global and navigation controls (top row); forest green =
-the primary action inside a box (Submit). New controls inherit from that split rather
-than accumulating a third treatment. Check lilac for contrast against the cream ground
-before shipping it.
+**The left column is one element**, `.editor-column`, holding the draft, the
+Checkpoint row, and the history below them. The wrapper is what stays pinned to grid
+column 1 — the chunk-08 guarantee that nothing on this side spreads under the sticky
+rail is unchanged, it just attaches one level up.
+
+**Button semantics:** lilac = global and navigation controls; forest green = **the
+commit action of a surface**, at that surface's bottom-right. New controls inherit
+from that split rather than accumulating a third treatment. Check lilac for contrast
+against the cream ground before shipping it.
+
+**There are exactly three commit actions and they are one visual group** (widened
+from "the primary action inside a box (Submit)" in chunk 15's layout pass):
+
+| surface | control | what it commits |
+| --- | --- | --- |
+| Prompt box | **Submit** | the prompt |
+| Standing Rules | **Add** | a standing rule |
+| the editor | **Checkpoint** | the draft |
+
+Each sits at the bottom-right of the box it acts on, and all three wear the same
+green. That is the whole of what makes them read as one act repeated rather than
+three buttons that happen to be last in their box — so the treatment is **declared
+once, in one grouped selector**, and three greens cannot drift apart one edit at a
+time. Anything added later that commits its surface joins that selector; anything
+that does not commit anything stays lilac.
+
+**Checkpoint is not sticky.** The first attempt at moving it pinned it to the bottom
+of the viewport, which bought reachability from anywhere at the cost of a band of
+the screen for the whole session — for a control met once per checkpoint, held over
+a record it has nothing to do with. It sits directly under the editor box,
+right-aligned, and above the rule that opens the history: inside the draft's own
+territory, which is also what says what it commits.
 
 **Candidates render in the draft, not in the panel**, anchored to their spans, with
 accept / reject / edit-in-place controls sitting with each candidate — visible without
@@ -1229,7 +1323,7 @@ resolved against the export's own `context` and `rules` tables. Metadata only:
 computed in the browser from the snapshots the file carries (§0.4) — a transcript
 stores no diffs and this page invents none.
 
-Surfacing `segments` here is not step 16. That step is about the LIVE surface
+Surfacing `segments` here is not step 17. That step is about the LIVE surface
 (§2.2, §9 S2, and S2 is provisional pending re-justification); an archived
 transcript is the one place the decomposition is otherwise unrecoverable.
 
@@ -1237,6 +1331,153 @@ transcript is the one place the decomposition is otherwise unrecoverable.
 by construction — a document address always begins `/t/`, and §0.5's token is 32
 hex characters — and both the server and the client entry read the same predicate
 in `src/addressing.js` rather than each carrying half of the guarantee.
+
+## 12b. The public front door: claim, landing page, registry
+
+Added in chunk 15. A stranger at the bare domain can read what the tool is, sign
+up with a name and an email, and receive a namespace — with no operator in the
+loop. Until this, every namespace was minted by hand at a terminal.
+
+### The claim endpoint
+
+`POST /api/public/claim`, taking `{name, email}`. **The one endpoint that needs no
+token**, because its whole job is handing one out; it lives under `/api/public/`
+rather than `/api/t/…` so that is visible in the address.
+
+Both fields are required. The name must be non-empty; the email must match a basic
+pattern and nothing more. **There is no verification email and no deliverability
+check**, so the pattern cannot establish that an address is real — it catches a
+typo obvious enough to be worth catching, and a stricter one would reject valid
+addresses while still proving nothing.
+
+**A claimed namespace is identical to a hand-minted one.** `generateToken` and
+`resolveNamespace` are called, never reimplemented; §0.5's machinery is unchanged
+and the only novelty is who triggered the mint.
+
+**Rate limit: five claims per hour per address, in memory.** Named constants in
+`src/claims.js`; the thresholds are reported in `reports/chunk-15.md`. Three
+properties, each of them deliberate:
+
+- It counts CLAIMS, not requests. A refused or invalid submission mints nothing, so
+  it does not spend one of the five — a visitor who mistypes their email twice has
+  not used up half their budget.
+- A refused attempt is not recorded, so retrying cannot extend a lockout.
+- The address is the RIGHTMOST `X-Forwarded-For` hop. Each proxy appends the address
+  it received from, so with one trusted proxy in front the last entry is what our
+  proxy saw; taking the leftmost would let anyone reset their own limit with a
+  header.
+
+**This is abuse friction, not enforcement.** It is per-process and a restart
+forgets it. The enforcement layer for spend is the Console workspace limit, which
+is the rule written down in the header of `src/usage-ledger.js` — nothing in `src/`
+may grow the ability to refuse a model call.
+
+### The claim registry
+
+One JSONL row per successful claim, appended to `claims.jsonl` on the documents
+volume beside `usage.jsonl`: `{at, name, email, token}`.
+
+**It holds the WHOLE token, and that is the deliberate mirror of §0.5's rule.** The
+usage ledger writes an eight-character prefix because a token in a log is a
+credential in a log. This file inverts that on purpose: it is the operator's user
+table and the ONLY record connecting a person to a namespace, and with no login and
+no recovery, a registry without the full token means a visitor who loses their link
+has lost their documents and nobody can help them. A prefix cannot open a
+namespace, which is exactly what makes it useless for this file's one job.
+
+**The rule that makes it safe is not a code rule, because it cannot be: the
+registry never leaves the server.** It is served by no route, read on no request
+path, included in no export, and pasted nowhere. `scripts/users-report.js` is its
+only reader and prints the prefix in its human table. Treat the file as the
+credential store it is.
+
+Registry writes follow the ledger's failure discipline: the write happens after the
+namespace exists and never throws, and a swallowed failure is reported in the
+server log rather than to the visitor, whose namespace is real either way.
+
+### The seed document
+
+A claimed namespace's first document is created at claim time and carries
+**exactly one turn**, whose snapshot is the `SEED_DOCUMENT` constant in
+`src/seed-document.js`. No synthetic history: the text arrives as an ordinary
+committed edit, so §0.3 holds from turn one and every §4 control behaves on it —
+the visitor can restore to it, diff against it, or replace it like any other turn.
+
+**Its slug is `welcome-doc`, not §0.5's `DEFAULT_SLUG`.** It is a welcome page and
+not the visitor's first draft: naming it `draft` invites someone to start writing
+over instructions they have not finished reading, and its own name is what makes it
+findable in the switcher later, which is what the seed text promises when it says
+the welcome page stays in your namespace. The consequence is stated rather than
+discovered — a claimed namespace has no document at the default slug, so trimming
+the URL to `/t/{token}` reaches §0.5's ordinary missing-document screen, which
+offers to create it and lists what is there. Nothing routes a new visitor there:
+the success link, the Start writing button and the switcher all name the welcome
+page.
+
+**The seed turn is authored `human`.** §3 has three authors and none of them is
+"system"; inventing one would change the turn schema for a rendering nicety. It is
+defensible on its own terms — a person placed this text — and it is recorded here
+so nobody later reads `human` as a bug.
+
+The seed text is Markdown in the §1 dialect — paragraphs and **bold section
+labels**, which is what a scannable label looks like in a dialect with no heading
+node — and it **carries no font styling**.
+It is stored editor content, not page chrome: a wordmark span in it would be markup
+outside the dialect and would round-trip to nothing. `wordwright.ink/view` in it is
+a bare URL and stays plain text (§0.1 has no GFM autolink literals).
+
+### The landing page and the success view
+
+`/` is the landing page. `/t/{token}/{slug}`, `/view` and `/api/…` are untouched;
+`/` is a client path like the other two, and all three tests come from
+`src/addressing.js` so there is one definition rather than several that agree
+today. **`/` no longer redirects into the development namespace on a loopback
+binding** — it behaves identically on every binding, which is what makes the front
+door testable in the place it is developed. `startServer` still prints the
+development link at every start. It hands out no token on any binding: §0.5 says
+nothing enumerates namespaces, and the page a stranger is most likely to reach is
+the last place to make an exception.
+
+It carries the lockup, `LANDING_COPY`, the name/email form, and `DISCLAIMERS`. On a
+successful claim the visitor lands on a success view **whose entire job is the
+link**: the full URL displayed large, a copy button, `KEY_DISCLOSURE` beside it,
+and a prominent Start writing link into the new document. That disclosure is §0.5's
+requirement that a namespace "be described that way to anyone given a link",
+discharged at the exact moment someone is given one.
+
+**Every rendered mention of the product name in page chrome and copy is set in
+Allison**, the self-hosted masthead face, including mid-sentence; body text stays
+in the existing faces. The mechanism splits the string and changes no character, so
+the ratified copy stays ratified. This does NOT apply inside the seed document, per
+the section above. Spelling is American throughout — *judgment*, matching the
+masthead.
+
+Failure states render calmly inline — rate-limited, invalid input, server error, a
+network that never answers — never a blank page and never console-only.
+
+The copy in all three constants is human-ratified verbatim, punctuation included.
+It lives in `client/src/landing-copy.js` and `src/seed-document.js` and is not to be
+reworded — only the human who ratified it changes it, and when she does, the reason
+is recorded beside the line. One such change so far: `LANDING_COPY` opened with
+"Welcome to WordWright." and that sentence was cut on 2026-09-08, because the lockup
+sits directly above it and the greeting was the reader's third look at the same name
+before the page had said anything. **The seed document still opens with it**, which
+is not an inconsistency: there it is the first thing said inside the tool rather
+than beneath its own sign.
+
+### The operator report
+
+`npm run users-report` reads `claims.jsonl` and `usage.jsonl` from the same root
+and prints one row per claim — date, name, email, token prefix, full link — joined
+on the prefix to calls, cost and last call. Namespaces present in usage and absent
+from claims are listed separately as hand-minted or unknown: that is the smoke
+detector with names attached, and it must never be folded into the named rows,
+because "a namespace nobody can account for is spending money" is a different fact
+from "a person is". `--csv` prints the same rows as CSV. An empty or missing
+registry exits 0 with a calm message, in the manner of the spend report.
+
+It refuses nothing and cannot, exactly as `scripts/spend-report.js` cannot. Nothing
+in `src/` imports it.
 
 ## 13. Open items
 
@@ -1283,7 +1524,7 @@ by the deploy-readiness chunk further down this section.
   speculative.
 - **F87** What "the same kind of correction" means operationally for S11. This is the
   difference between a useful proposal and a nag, and it is the one genuinely unsolved
-  problem in the extension. **Blocks step 17 and nothing earlier.**
+  problem in the extension. **Blocks step 18 and nothing earlier.**
 Raised by the deploy-readiness chunk, 2026-09-04 (`reports/deploy-readiness.md`):
 
 - **F89** `/` answered Express's default "Cannot GET /" whenever `client/dist` was
@@ -1321,8 +1562,14 @@ are not reused:
   Response holds speech only (§12).
 
 Still open from chunk 10: **F48** (the `+` is in the layout but attaches nothing until
-step 12), **F50** (the history toggle lost its turn count), **F53** (which top-row
-controls are disabled mid-turn).
+step 12), **F53** (which top-row controls are disabled mid-turn).
+
+**F50 — the history toggle lost its turn count.** RESOLVED 2026-09-08 in chunk 15's
+layout pass. The toggle moved out of the top row to the History section's own
+heading and carries the count again — `Hide History (12)`. It has to be on the
+control rather than in the heading's hint, because the hint is part of what
+collapses: hidden, the button is the only thing left saying how much record there
+is. See §12 and `reports/mini-ui-updates.md`.
 
 Raised by live use after chunk 11 (commit 0adf03d), resolved in chunk 11a:
 
@@ -1353,13 +1600,15 @@ not by number, so the reference survives every extension.
 Entries are pointers. Anything a chunk needs to know lives in the section it names;
 what belongs here is *where in the sequence* and *why there*.
 
-Steps 1–14 are built, tested, committed, and live-verified: canonicalize,
-round-trip, storage, turn model and Checkpoint, AI endpoint, editor and panel,
-clipboard fixture, history view, the spec extension, the §12 UI cleanup, model
-speech, context files plus human-written standing rules, deploy, and the export
-viewer with history-on-by-default. Step 14 is `reports/chunk-14.md`, ratified
-2026-09-08 at version `0.1.2` after its live check on the running instance. The
-detail is in git and in `reports/`.
+Steps 1–15 are built, tested and committed: canonicalize, round-trip, storage, turn
+model and Checkpoint, AI endpoint, editor and panel, clipboard fixture, history
+view, the spec extension, the §12 UI cleanup, model speech, context files plus
+human-written standing rules, deploy, the export viewer with
+history-on-by-default, and the public front door. Step 15 is `reports/chunk-15.md`,
+ratified 2026-09-08 at version `0.1.3`, with its interface decisions told as one
+story in `reports/mini-ui-updates.md`. Steps 1–14 are additionally live-verified;
+step 15's first real sign-up is the check it is waiting on. The detail is in git and
+in `reports/`.
 
 **The app is deployed and in real use.** Step 13 is done, and the version was
 `0.1.0` from the chunk-13 commit; the WordWright rebrand took it to `0.1.1` per the
@@ -1384,9 +1633,11 @@ This state line is maintained by the chunk it describes, per the Operating rules
 
 **Deploy and staging swapped 2026-09-04, ratified.** Deploy was step 14 and staging
 step 13; the swap made them 13 and 14. **Chunk 14 then took the number 14** (the
-export viewer, 2026-09-08), pushing staging to 15 and everything after it down one.
-The numbers below are the current order; the older ones survive in the reports that
-were written under them, which is why this note stays.
+export viewer, 2026-09-08), pushing staging to 15. **Chunk 15 then took 15** (the
+public front door, 2026-09-08), pushing staging to 16 and everything after it down
+one again. The numbers below are the current order; the older ones survive in the
+reports that were written under them, which is what this note is for — see the
+Report naming rule in the Operating rules.
 
 13. **Deploy.** Railway with a persistent volume, per §0.5 and §0.6. F37 is resolved
     (§0.5: the default token is refused off localhost), as is F43 (accepted:
@@ -1409,20 +1660,29 @@ were written under them, which is why this note stays.
     became worth sending the moment the tool was deployed and shared, and reading
     one required either the app or a text editor until this step.
 
-15. **Staging and disposition.** §0.8, §0.9, the full §2.2 contract, §12. Do not merge
-    this with anything. Downstream of deploy, so it ships to people already using
-    the tool: it is a `(behavior change)` line in `CHANGELOG.md` by definition.
+15. **Public claim, landing page, signup registry.** §12b. Placed here, ahead of
+    staging, because it is the step that changes who can use the thing at all: every
+    namespace until now was minted by hand at a terminal, which made the operator a
+    bottleneck on every single user. It touches no part of the turn model, the AI
+    path, or the export format — the endpoint calls §0.5's machinery and modifies
+    none of it.
 
-16. **Segmentation.** §2.2's `segments` surfaced in the LIVE surface, contingent
+16. **Staging and disposition.** §0.8, §0.9, the full §2.2 contract, §12. Do not merge
+    this with anything. Downstream of deploy, so it ships to people already using
+    the tool: it is a `(behavior change)` line in `CHANGELOG.md` by definition. Now
+    also downstream of the front door, so "people already using the tool" may be
+    people the operator never handed a link to.
+
+17. **Segmentation.** §2.2's `segments` surfaced in the LIVE surface, contingent
     candidates marked, panel↔editor links. Provisional per §9. Note that §12a's
     viewer already renders `segments` in an archived transcript; this step is about
     the working surface, which is a different question and the one S2 is provisional
     about.
 
-17. **Standing rule proposals.** §10's model-proposed half. Provisional per §10;
+18. **Standing rule proposals.** §10's model-proposed half. Provisional per §10;
     blocked on F87.
 
-18. Everything else.
+19. Everything else.
 
 Run `node scripts/smoke-session.js` after every chunk. A passing test proves nothing if
 its fixture is empty; every test runs against the shared fixtures in §5, visible in the

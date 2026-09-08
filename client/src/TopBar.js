@@ -1,30 +1,29 @@
 /**
  * The top row (CLAUDE.md §12).
  *
- *   Show/hide history · document name (opens a switcher) · + New document ·
- *   Export transcript · Checkpoint
+ *   document name (opens a switcher) · + New Document · Export Transcript ·
+ *   View WordWright Doc
  *
- * That order is the spec's, and it is the whole of the global chrome. §12 removed
- * the Documents panel and the status row beneath the separator, so switching
- * documents, creating one, and the uncommitted-edits signal all live here now.
+ * That order is the spec's, and it is the whole of the global chrome.
  *
- * Two things are load-bearing rather than decorative:
+ * TWO CONTROLS LEFT THIS ROW in chunk 15's layout pass, each to sit beside what it
+ * acts on rather than in a row of everything:
  *
- * 1. CHECKPOINT CARRIES THE DIRTY SIGNAL ITSELF. The status row that used to say
- *    "Uncommitted edits: yes" is gone (§12), so if the button did not say it,
- *    nothing would. It is said twice on purpose — a marker a sighted reader sees
- *    and an `aria-label` a screen reader hears — because a coloured dot alone is
- *    not a fact anyone can act on.
+ *   Show/hide history → the History section's own heading (History.js), where it
+ *                       also carries the turn count again (F50).
+ *   Checkpoint        → the editor's bottom-right (App.js), parallel to the
+ *                       Prompt box's Submit: each surface's commit action at its
+ *                       own bottom-right. The dirty signal went with it.
  *
- * 2. THE SWITCHER AND THE NEW-DOCUMENT FIELD ARE DRAWERS, NOT POPOVERS. They push
- *    the page down rather than floating over it. §12 wants nothing overlaying the
- *    draft, and an absolutely positioned menu is the cheapest way to end up with
- *    something that does.
+ * What remains is load-bearing: THE SWITCHER AND THE NEW-DOCUMENT FIELD ARE
+ * DRAWERS, NOT POPOVERS. They push the page down rather than floating over it.
+ * §12 wants nothing overlaying the draft, and an absolutely positioned menu is the
+ * cheapest way to end up with something that does.
  */
 
 import { useState } from 'react';
 
-import { documentAddress } from '../../src/addressing.js';
+import { VIEWER_ADDRESS, documentAddress } from '../../src/addressing.js';
 import { h } from './h.js';
 
 /** `2026-08-21T…` → `21 Aug`, or '' when a document has no activity yet. */
@@ -38,23 +37,18 @@ function shortDate(iso) {
 
 /**
  * @param {{token: string, slug: string, documents: object[], missing?: boolean,
- *   dirty?: boolean, busy?: boolean, turns?: number, showHistory?: boolean,
- *   onToggleHistory: () => void, onCreate: (slug: string) => void,
- *   onExport: () => void, onCheckpoint: () => void}} props
+ *   busy?: boolean, turns?: number, onCreate: (slug: string) => void,
+ *   onExport: () => void}} props
  */
 export function TopBar({
   token,
   slug,
   documents = [],
   missing = false,
-  dirty = false,
   busy = false,
   turns = 0,
-  showHistory = false,
-  onToggleHistory,
   onCreate,
   onExport,
-  onCheckpoint,
 }) {
   // Only one drawer is open at a time: 'switcher' | 'new' | null. Two open at
   // once would push the draft down twice for no reason.
@@ -76,16 +70,6 @@ export function TopBar({
     h('button', { key, type: 'button', className: 'top-button', ...props }, label);
 
   const controls = [
-    // §4's toggle. Not over the draft — see the note on `.history` in the
-    // stylesheet; the timeline sits below the editor and scrolls with it.
-    missing
-      ? null
-      : button('history', showHistory ? 'Hide history' : 'Show history', {
-          className: 'top-button history-toggle',
-          'aria-expanded': showHistory,
-          onClick: onToggleHistory,
-        }),
-
     // The document name IS the switcher (§12). It doubles as the answer to
     // "which document am I in", which the removed status row used to give.
     button('name', slug, {
@@ -95,7 +79,7 @@ export function TopBar({
       onClick: () => toggle('switcher'),
     }),
 
-    button('new', '+ New document', {
+    button('new', '+ New Document', {
       className: `top-button${drawer === 'new' ? ' top-button-open' : ''}`,
       'aria-expanded': drawer === 'new',
       disabled: busy,
@@ -107,7 +91,7 @@ export function TopBar({
     // saying so on the control beats handing over an empty file.
     missing
       ? null
-      : button('export', 'Export transcript', {
+      : button('export', 'Export Transcript', {
           disabled: turns === 0,
           title:
             turns === 0
@@ -116,21 +100,34 @@ export function TopBar({
           onClick: onExport,
         }),
 
-    missing
-      ? null
-      : button(
-          'checkpoint',
-          ['Checkpoint', dirty ? h('span', { key: 'dot', className: 'dirty-dot', 'aria-hidden': 'true' }, '•') : null],
-          {
-            className: `top-button checkpoint${dirty ? ' checkpoint-marked' : ''}`,
-            disabled: busy,
-            'aria-label': dirty ? 'Checkpoint — you have uncommitted hand edits' : 'Checkpoint',
-            title: dirty
-              ? 'Hand edits are not yet committed as a turn. Checkpoint commits them.'
-              : 'Everything you have typed is already committed as a turn.',
-            onClick: onCheckpoint,
-          },
-        ),
+    // §12a's viewer, reachable from the working surface (chunk 15). An ANCHOR, not
+    // a button: it goes somewhere, so middle-click, cmd-click and "open in new
+    // tab" all work without a handler of ours in the path.
+    //
+    // NEW TAB, and that is the load-bearing part. Hand edits are uncommitted until
+    // Checkpoint (§3), so navigating away in this tab would silently discard
+    // whatever is typed and not yet ratified — the exact loss the dirty marker on
+    // Checkpoint exists to warn about. The draft stays open behind it, which is
+    // also the shape of the task: export a transcript here, read it there.
+    //
+    // The capability token is in this page's URL, and `rel="noopener"` plus the
+    // document-wide `<meta name="referrer" content="no-referrer">` in index.html
+    // keep it out of both the opened window's `opener` and its Referer header.
+    //
+    // Shown even when the slug is missing: it is a global control and it works
+    // whether or not this address names a document.
+    h(
+      'a',
+      {
+        key: 'viewer',
+        className: 'top-button',
+        href: VIEWER_ADDRESS,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        title: 'Open the read-only transcript viewer in a new tab.',
+      },
+      'View WordWright Doc',
+    ),
   ];
 
   const switcher =

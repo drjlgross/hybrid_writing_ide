@@ -96,7 +96,7 @@ export function Toolbar({ editor, disabled }) {
             if (event.key === 'Escape') setLinkValue(null);
           },
         }),
-        h('button', { key: 'set', type: 'submit', className: 'tool' }, 'set'),
+        h('button', { key: 'set', type: 'submit', className: 'tool' }, 'Set'),
       ]),
     );
   }

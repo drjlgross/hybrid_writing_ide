@@ -578,7 +578,7 @@ test('§4 clicking a turn opens the whole draft as of that turn, read-only', asy
   try {
     assert.equal(view.findAll('.turn-snapshot').length, 0, 'closed to begin with');
 
-    await view.click(view.findByText('button', 'Open turn 2 read-only'));
+    await view.click(view.findByText('button', 'Open Turn 2 Read-Only'));
 
     const snapshot = view.find('.turn-snapshot');
     assert.ok(snapshot, 'the turn opens');
@@ -594,7 +594,7 @@ test('§4 clicking a turn opens the whole draft as of that turn, read-only', asy
     assert.equal(snapshot.querySelectorAll('input, textarea, button').length, 0);
     assert.equal(text.getAttribute('aria-readonly'), 'true');
 
-    await view.click(view.findByText('button', 'Hide turn 2'));
+    await view.click(view.findByText('button', 'Hide Turn 2'));
     assert.equal(view.findAll('.turn-snapshot').length, 0, 'and it closes again');
   } finally {
     await view.unmount();
@@ -605,10 +605,10 @@ test('§4 only one turn is open at a time, and it is the one that was clicked', 
   const view = await mount();
 
   try {
-    await view.click(view.findByText('button', 'Open turn 1 read-only'));
+    await view.click(view.findByText('button', 'Open Turn 1 Read-Only'));
     assert.equal(view.find('.turn-snapshot pre').textContent, SESSION[0].snapshot);
 
-    await view.click(view.findByText('button', 'Open turn 3 read-only'));
+    await view.click(view.findByText('button', 'Open Turn 3 Read-Only'));
     const open = view.findAll('.turn-snapshot');
     assert.equal(open.length, 1, 'opening another closes the first');
     assert.equal(open[0].querySelector('pre').textContent, SESSION[2].snapshot);
@@ -621,7 +621,7 @@ test('§4 a snapshot cannot be mistaken for the live draft', async () => {
   const view = await mount();
 
   try {
-    await view.click(view.findByText('button', 'Open turn 1 read-only'));
+    await view.click(view.findByText('button', 'Open Turn 1 Read-Only'));
 
     // Said in words, on the element itself.
     assert.match(view.find('.snapshot-label').textContent, /Read-only/);
@@ -681,7 +681,11 @@ test('the history sits in the editor column, scrolls with the document, and over
   // in the editor's column, the same width as the draft it describes.
   const history = rule('.history');
   assert.doesNotMatch(history, /position: *(fixed|absolute)/, 'the history must not float over the draft');
-  assert.match(history, /grid-column: *1;/, "the editor's column, not the full grid width");
+  // The pin moved to `.editor-column` in chunk 15's layout pass — the history is
+  // inside that wrapper now, so the wrapper is the grid item and the thing that
+  // has to stay in column 1. The guarantee is unchanged: nothing on this side may
+  // spread under the sticky rail.
+  assert.match(rule('.editor-column'), /grid-column: *1;/, "the editor's column, not the full grid width");
   assert.doesNotMatch(
     history,
     /grid-column: *1 \/ -1/,

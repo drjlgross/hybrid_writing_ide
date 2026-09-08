@@ -2,6 +2,7 @@
  * How a document is addressed (CLAUDE.md §0.5), and which paths belong to the
  * client at all.
  *
+ *     /                    the landing page (chunk 15)
  *     /t/{token}/{slug}    the app
  *     /view                the export viewer (chunk 14)
  *
@@ -95,6 +96,18 @@ export function isViewerAddress(pathname) {
 }
 
 /**
+ * The bare root, and nothing else — the public landing page (§12b).
+ *
+ * `/` is the one address a stranger reaches without being given anything, which is
+ * why it is the front door rather than a redirect into a namespace. It hands out
+ * no token: §0.5 says nothing enumerates namespaces, and the page a stranger is
+ * most likely to reach is the last place to make an exception.
+ */
+export function isLandingAddress(pathname) {
+  return String(pathname ?? '') === '/';
+}
+
+/**
  * Does this path belong to the single-page client?
  *
  * Deliberately LOOSER than `parseDocumentAddress` on the token: `/t/nonsense/x`
@@ -107,5 +120,5 @@ export function isViewerAddress(pathname) {
  */
 export function isClientPath(pathname) {
   const path = String(pathname ?? '');
-  return /^\/t\/[^/]+(\/[^/]*)?\/?$/.test(path) || isViewerAddress(path);
+  return /^\/t\/[^/]+(\/[^/]*)?\/?$/.test(path) || isViewerAddress(path) || isLandingAddress(path);
 }

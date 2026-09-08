@@ -149,9 +149,17 @@ body {
   flex-wrap: wrap;
 }
 
+/* Buttons and, since chunk 15, one anchor — the link to the viewer. The two need
+   the same treatment because §12's split is about what a control DOES (global and
+   navigation controls are lilac), not about which element it happens to be. The
+   anchor rules below are what an <a> needs to sit on a button's baseline. */
 .top-button {
   font: inherit;
   font-size: 0.85rem;
+  /* Pinned on both sides of the family: a <button> defaults to `normal` and an
+     <a> would inherit the body's 1.6, which is exactly the few pixels that made
+     the viewer link taller than its neighbours. */
+  line-height: 1.2;
   padding: 0.3rem 0.7rem;
   border: 1px solid var(--lilac-edge);
   border-radius: 4px;
@@ -185,13 +193,20 @@ body {
    The dot is the sighted half; the button's aria-label is the other half, and
    neither is the only one, because a colour is not a fact a screen reader can
    pass on. */
+/* Marked: a bright edge on the same fill. Not a different colour — the button's job
+   has not changed, only whether something is waiting to be committed. */
 .checkpoint-marked {
-  border-color: var(--lilac-deep);
+  border-color: #fff;
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
+/* The uncommitted-edits marker, now on the green Checkpoint (§12: there is no
+   status row for it to live in, so if the button does not say it, nothing does).
+   White on the accent fill rather than the lilac it wore when the button was
+   lilac — the marker has to be legible against whatever it sits on. */
 .dirty-dot {
   margin-left: 0.35rem;
-  color: var(--lilac-deep);
+  color: #fff;
   font-size: 1.1em;
   line-height: 0;
   vertical-align: middle;
@@ -253,6 +268,23 @@ body {
   padding: 1.5rem 2rem 4rem;
 }
 
+/* THE EDITOR'S COLUMN, as one box: the draft, the history below it, and the
+   Checkpoint bar last (chunk 15's layout pass).
+
+   It exists so the sticky bar has a containing block that covers the whole
+   column. `position: sticky` only holds an element inside its own containing
+   block; with the draft and the history as separate grid items, a bar in the
+   draft would scroll away the moment the history came into view — which is the
+   §12/F65 reachability failure, in the other column. `min-width: 0` because a
+   grid item's default `min-width: auto` lets a long unbroken line in the draft
+   push the column wider than its track. */
+.editor-column {
+  grid-column: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 @media (max-width: 60rem) {
   .workspace {
     grid-template-columns: minmax(0, 1fr);
@@ -311,7 +343,32 @@ body {
 }
 
 .editor .tiptap {
-  min-height: 60vh;
+  /* Sized so the History heading and the top of the newest turn are ON SCREEN at
+     first paint, without scrolling.
+     
+     The record is the feature nobody arrives knowing about, and a UI that puts it
+     below the fold makes discovering it something you have to already want. A
+     fixed 60vh cleared the fold by 150-odd pixels at every viewport, which is the
+     worst case: always just out of sight.
+     
+     The subtrahend is the fixed furniture above and below the editor — masthead,
+     toolbar, the Checkpoint row, the history's own top margin — measured in the
+     browser at 260 + 32 + 37 plus margins, and it does not scale with the
+     viewport, so it has to come off as pixels rather than as a percentage. The
+     `max()` floor keeps a usable writing surface on a short screen, where showing
+     the record would otherwise cost more than it is worth. */
+  min-height: max(18rem, calc(100vh - 36rem));
+  /* CAPPED, and scrolling inside itself. The min-height above is not enough on its
+     own: a draft with real text in it is as tall as its text, so on any document
+     anyone has actually written the history goes back below the fold. The cap is
+     what makes the promise hold for a long draft as well as a new one.
+     
+     The cost is a second scroll region on the page, which is a real change to how
+     the editor feels — the trade is deliberate. The caret is followed
+     automatically by the browser inside a scrollable box, so typing past the
+     bottom edge behaves the way it does in any other text area. */
+  max-height: max(18rem, calc(100vh - 36rem));
+  overflow-y: auto;
   padding: 2rem 2.25rem;
   background: #fff;
   border: 1px solid var(--line);
@@ -664,19 +721,30 @@ body {
   background: #fff;
 }
 
+/* Add is a commit action and wears the treatment below. It keeps only what its own
+   row needs: the rules box is denser than the prompt box, and this button shares a
+   line with a text input. */
 .rule-submit {
-  font: inherit;
-  font-size: 0.8rem;
-  padding: 0.3rem 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
-/* Forest green: the primary action inside a box, and the only thing that wears
-   this treatment (§12). */
-.submit {
+/* ── THE COMMIT TREATMENT (§12) ───────────────────────────────────────────────
+ *
+ * Forest green, at the bottom-right of its surface. There are three of these and
+ * they are the same act three times: Submit commits the prompt, Add commits a
+ * standing rule, Checkpoint commits the draft. The shared colour is what makes
+ * them read as one group rather than three buttons that happen to be last in their
+ * box — and what makes them visibly not lilac, which is navigation.
+ *
+ * ONE RULE, THREE CLASSES. The class names survive as identity hooks — tests and
+ * other rules select `.submit`, `.rule-submit`, `.checkpoint` — but the treatment
+ * is declared here once, so the three cannot drift into three greens. Anything
+ * added later that commits its surface joins this selector; anything that does not
+ * commit anything stays lilac. */
+.submit,
+.rule-submit,
+.checkpoint {
   font: inherit;
   font-size: 0.85rem;
   padding: 0.4rem 0.9rem;
@@ -687,7 +755,9 @@ body {
   cursor: pointer;
 }
 
-.submit:disabled {
+.submit:disabled,
+.rule-submit:disabled,
+.checkpoint:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -837,7 +907,11 @@ body {
   max-width: 56ch;
 }
 
-.missing .primary {
+/* §12's forest green: the primary action. Declared once and used by the missing-
+   document pane and by the landing form's Start writing, rather than each growing
+   its own — §12 says a new control inherits from the split, and two copies of the
+   same treatment is how a third treatment eventually appears. */
+.primary {
   font: inherit;
   font-size: 0.9rem;
   padding: 0.45rem 0.9rem;
@@ -848,7 +922,7 @@ body {
   cursor: pointer;
 }
 
-.missing .primary:disabled {
+.primary:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -866,15 +940,29 @@ body {
    screen and stays editable while this is open, because the entire point of the
    read-only turn view is copying a sentence out of it and into the live draft. */
 .history {
-  grid-column: 1;
   margin-top: 2rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--line);
 }
 
+/* The heading and the show/hide control on one line, the control immediately to
+   the right of the word it acts on (chunk 15's layout pass). `baseline` rather
+   than `center` so the button's label sits on the heading's baseline instead of
+   floating beside it. */
+.history-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .history-head h2 {
   margin: 0;
   font-size: 1rem;
+}
+
+.history-note {
+  margin-top: 0.4rem;
 }
 
 .turn-list {
@@ -1337,4 +1425,176 @@ body {
   font-family: var(--mono-font);
   font-size: 0.78rem;
   color: var(--muted);
+}
+
+/* ── the public landing page, / (§12b) ──────────────────────────────────────── */
+
+.landing-main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 2rem 2rem 4rem;
+}
+
+.landing-copy p {
+  margin: 0 0 1.1rem;
+  font-size: 1.05rem;
+  line-height: 1.65;
+}
+
+/* The product name, set in the masthead face wherever it is rendered — including
+   mid-sentence (§12b). Allison is a light script, so at body size it would read
+   thinner than the text around it; the bump and the baseline nudge make it sit as
+   a name inside a sentence rather than as a smaller word. `wordmarked()` does the
+   splitting and changes no character. NOT used inside the seed document, which is
+   stored editor content and carries no font styling. */
+.wordmark-inline {
+  font-family: var(--wordmark-font);
+  font-size: 1.45em;
+  line-height: 1;
+  /* A script face sits high in its em box; without this it rides above the
+     baseline of the serif it is embedded in. */
+  vertical-align: -0.08em;
+  padding: 0 0.04em;
+}
+
+.claim-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 1.6rem 0 1rem;
+}
+
+.claim-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 12rem;
+}
+
+.claim-field span {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.claim-field input {
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.claim-field input:focus {
+  outline: 2px solid var(--lilac-deep);
+  outline-offset: 1px;
+}
+
+.claim-submit {
+  flex: 0 0 auto;
+}
+
+/* Rate-limited, invalid input, server error. One calm line, in the place the
+   visitor was already looking — never a blank page, never console-only. */
+.claim-error {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--error);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--error);
+  font-size: 0.9rem;
+}
+
+.landing-disclaimers {
+  margin: 2.5rem 0 0;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* ── the success view ──────────────────────────────────────────────────────── */
+
+.claim-done h2 {
+  margin: 0 0 0.9rem;
+  font-size: 1.15rem;
+}
+
+/* THE LINK, LARGE. Everything else on this view is subordinate to it being seen,
+   copied and kept — there is no login and no recovery, so this string is the whole
+   of what the visitor walks away with. Monospace because it is a token to be read
+   character by character if it is ever typed, and `overflow-wrap: anywhere` because
+   it must never be clipped by a narrow viewport. */
+.claim-link {
+  margin: 0 0 1rem;
+  padding: 1rem 1.1rem;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: #fff;
+  font-family: var(--mono-font);
+  font-size: 1.05rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.claim-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.4rem;
+}
+
+.claim-start {
+  text-decoration: none;
+  display: inline-block;
+}
+
+/* §0.5's disclosure, beside the link and not below the fold. Bordered rather than
+   quiet: it is the one thing on this page a visitor must actually read. */
+.claim-disclosure {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  background: var(--panel);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+/* The viewer link in the top row. An anchor wearing `.top-button`, which has to be
+   the SAME HEIGHT as the buttons beside it or the row reads as two families.
+   `inline-flex` with `align-items: center` matches how a button centres its label,
+   and the explicit line-height stops the anchor inheriting the body's 1.6 and
+   growing a few pixels taller than everything else. */
+a.top-button {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.2;
+}
+
+/* ── Checkpoint, at the editor's bottom-right (§12) ────────────────────────────
+ *
+ * The third commit action, in the same green as Submit and Add and in the same
+ * place relative to its own surface: directly under the editor box, right-aligned,
+ * and ABOVE the rule that opens the history.
+ *
+ * NOT STICKY, and that reverses the first attempt at this. A pinned bar was
+ * reachable from anywhere in the column and paid a band of the viewport for the
+ * whole session to buy it — a control you meet once per checkpoint, held on screen
+ * through every scroll of the record. At the foot of the draft it says what it
+ * commits; floating, it read as a page-level toolbar over a record it has nothing
+ * to do with. */
+.draft-commit {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
 }

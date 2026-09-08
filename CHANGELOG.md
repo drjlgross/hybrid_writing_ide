@@ -7,6 +7,23 @@ file exists, now that the tool is deployed and someone else may be holding a lin
 
 Entries are newest first.
 
+## 0.1.3 — 2026-09-08 (behavior change)
+
+Chunk 15: a public front door. The bare domain is now a landing page where anyone can
+sign up with a name and an email and receive their own namespace, seeded with a
+welcome document, without an operator in the loop — `POST /api/public/claim`, a
+per-address rate limit, and a `claims.jsonl` registry read by the new
+`npm run users-report`. `/` no longer redirects into the development namespace on a
+loopback binding; it is the same page everywhere.
+
+The working surface was rearranged with it. Show/Hide History moved to the History
+heading and carries the turn count again; Checkpoint moved to the editor's
+bottom-right and joined Submit and Add as one green group — three commit actions, one
+per surface, at each surface's own corner. A View WordWright Doc control opens the
+transcript viewer in a new tab. Button labels are Title Case. The editor is capped so
+the history is on screen at first paint, which is the point of the whole tool being
+visible without going looking for it.
+
 ## 0.1.2 — 2026-09-08 (behavior change)
 
 Chunk 14. A read-only export viewer at `/view`: it renders a transcript JSON entirely

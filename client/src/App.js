@@ -218,15 +218,50 @@ export function App({
     slug,
     documents: state.documents,
     missing: state.missing,
-    dirty: state.dirty,
     busy,
     turns: state.history.length,
-    showHistory,
-    onToggleHistory: () => setShowHistory((was) => !was),
     onCreate: createDocument,
     onExport: exportTranscript,
-    onCheckpoint: () => sessionRef.current.checkpoint(),
   });
+
+  /**
+   * Checkpoint, at the editor's bottom-right (§12, chunk 15's layout pass).
+   *
+   * PARALLEL TO SUBMIT, and to the rules box's Add: three commit actions, one per
+   * surface, each at its own surface's bottom-right and all three in the same
+   * forest green. That shared treatment is what makes them one group rather than
+   * three buttons that happen to be last in their box.
+   *
+   * It sits directly under the editor and ABOVE the rule that opens the history —
+   * inside the draft's own territory, not floating over the record below it.
+   *
+   * IT CARRIES THE DIRTY SIGNAL, exactly as it did in the top row. §12 removed the
+   * status row that used to say "Uncommitted edits: yes", so if this button did not
+   * say it, nothing would. It is said twice on purpose — a marker a sighted reader
+   * sees and an `aria-label` a screen reader hears — because a coloured dot alone is
+   * not a fact anyone can act on. The signal travels with the button, which is why
+   * this is one element and not a button plus a status line somewhere else.
+   */
+  const checkpointBar = h('div', { key: 'commit', className: 'draft-commit' }, [
+    h(
+      'button',
+      {
+        key: 'checkpoint',
+        type: 'button',
+        className: `checkpoint${state.dirty ? ' checkpoint-marked' : ''}`,
+        disabled: busy,
+        'aria-label': state.dirty ? 'Checkpoint — you have uncommitted hand edits' : 'Checkpoint',
+        title: state.dirty
+          ? 'Hand edits are not yet committed as a turn. Checkpoint commits them.'
+          : 'Everything you have typed is already committed as a turn.',
+        onClick: () => sessionRef.current.checkpoint(),
+      },
+      [
+        'Checkpoint',
+        state.dirty ? h('span', { key: 'dot', className: 'dirty-dot', 'aria-hidden': 'true' }, '•') : null,
+      ],
+    ),
+  ]);
 
   // §0.5: an address naming a slug that does not exist is not an error page. The
   // human was handed a link; the useful answer is "that one is not here yet,
@@ -308,12 +343,44 @@ export function App({
       ]),
     ]),
     h('main', { key: 'workspace', className: 'workspace' }, [
+      // THE EDITOR'S COLUMN, as one element. It was two grid items — the draft and
+      // the history — until chunk 15's layout pass. Wrapping them makes the
+      // column a single containing block, which is what the sticky Checkpoint bar
+      // needs to stay reachable while the history is being read (§12's
+      // reachability standard, the same one F65 imposed on the rail). It is the
+      // same trick the rail uses with `grid-row: 1 / -1`, done with a wrapper
+      // because these two are stacked rather than spanning.
+      //
       // The missing-slug screen appears BESIDE the draft pane, which is merely
       // hidden. The pane is keyed, so React keeps the same DOM node across the
       // change — the TipTap mount point survives, and the effect that built the
       // editor into it (keyed on token+slug) does not re-run and tear it down.
-      state.missing ? missingPane : null,
-      draftPane,
+      h('div', { key: 'column', className: 'editor-column' }, [
+        state.missing ? missingPane : null,
+        draftPane,
+
+        // Under the editor and above the history's rule: the draft's own commit
+        // action, inside the draft's own territory.
+        state.missing ? null : checkpointBar,
+
+        // §4: the timeline sits BELOW the draft, in the editor's own column. Not a
+        // modal and not an overlay — the draft stays on screen and stays editable
+        // while the history is open, which is what makes "copy a sentence out of
+        // turn 3 into the live draft" a thing a person can actually do.
+        //
+        // Rendered whether or not it is open: its heading carries the toggle now,
+        // and a control inside the thing it toggles would vanish with it.
+        state.missing
+          ? null
+          : h(History, {
+              key: 'history',
+              history: state.history,
+              busy,
+              open: showHistory,
+              onToggle: () => setShowHistory((was) => !was),
+              onRestore: (turnId) => sessionRef.current.restoreTo(turnId),
+            }),
+      ]),
 
       // §12's right column: three boxes, same paper treatment, top to bottom.
       // Two of them are empty in this chunk and say so; see their own files.
@@ -346,18 +413,6 @@ export function App({
             }),
           ]),
 
-      // §4: the timeline sits BELOW the draft, in the editor's own column. Not a
-      // modal and not an overlay — the draft stays on screen and stays editable
-      // while the history is open, which is what makes "copy a sentence out of
-      // turn 3 into the live draft" a thing a person can actually do.
-      showHistory && !state.missing
-        ? h(History, {
-            key: 'history',
-            history: state.history,
-            busy,
-            onRestore: (turnId) => sessionRef.current.restoreTo(turnId),
-          })
-        : null,
     ]),
 
     // The § Versioning rule: "the deployed UI surfaces the current version

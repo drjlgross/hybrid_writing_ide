@@ -178,12 +178,14 @@ test('/view cannot collide with a document address or with the API', () => {
   // the client can explain the link (§0.5 — rejected, never repaired).
   assert.equal(isClientPath('/t/not-a-token/draft'), true);
 
+  // `/` joined this list in chunk 15 — it is the landing page now, and it is a
+  // client path like the other two. It is asserted in test/claims.test.js.
+
   // Everything the client must NOT be handed.
   for (const path of [
     `/api/t/${DEFAULT_TOKEN}/documents/draft`,
     '/api/t/x/library',
     '/health',
-    '/',
     '/assets/index-abc.js',
     '/viewer',
     `/t/${DEFAULT_TOKEN}/draft/extra`,
@@ -512,10 +514,10 @@ test('the viewer is read-only: no Restore, on any turn, ever', async () => {
 
     assert.equal(count(view, '.turn'), 3, 'the turns are there');
     assert.equal(count(view, '.turn-restore'), 0, 'and not one Restore control');
-    assert.doesNotMatch(view.text(), /Restore to this turn/);
+    assert.doesNotMatch(view.text(), /Restore to This Turn/);
 
     // The read-only snapshot view survives, because reading is the whole point.
-    await view.click(view.findByText('button', 'Open turn 1 read-only'));
+    await view.click(view.findByText('button', 'Open Turn 1 Read-Only'));
     assert.match(view.find('.snapshot-text').textContent, /settles into place/);
   } finally {
     await view.unmount();

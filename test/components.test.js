@@ -279,7 +279,7 @@ test('Checkpoint that made a turn names it, and the turn count moves', async () 
   try {
     // §12 removed the turn-count row. The count the client holds now surfaces on
     // Export transcript, which is the control that acts on it.
-    const exported = () => view.findByText('button', 'Export transcript').getAttribute('title');
+    const exported = () => view.findByText('button', 'Export Transcript').getAttribute('title');
     assert.match(exported(), /Save all 1 turn\b/, 'one turn before');
 
     await view.click(view.find('.checkpoint'));
@@ -490,7 +490,7 @@ test('a document can be created, and creating another one goes there', async () 
   });
 
   try {
-    await view.click(view.findByText('button', '+ New document'));
+    await view.click(view.findByText('button', '+ New Document'));
     await view.type(view.find('.new-document-form input'), 'Track C Post');
     await view.click(view.findByText('.new-document-form button', 'Create'));
     await view.flush();
@@ -642,14 +642,14 @@ test('§1 the link control sets and clears a link, serializing as [text](url)', 
 
     await view.type(input, 'https://example.com/docs');
 
-    await view.click(view.findByText('.link-form button', 'set'));
+    await view.click(view.findByText('.link-form button', 'Set'));
     assert.equal(serializeEditorMarkdown(editor), 'read the [docs](https://example.com/docs)\n');
 
     // Reopening prefills the current href, and an empty value removes the link.
     await view.click(view.findByText('button', '🔗'));
     assert.equal(view.find('.link-form input').value, 'https://example.com/docs');
     await view.type(view.find('.link-form input'), '');
-    await view.click(view.findByText('.link-form button', 'set'));
+    await view.click(view.findByText('.link-form button', 'Set'));
 
     assert.equal(serializeEditorMarkdown(editor), 'read the docs\n');
   } finally {
@@ -689,6 +689,7 @@ test('§4 the history is toggleable, and opening it never covers the draft', asy
     // an unasked-for rewording only when you were already suspicious.
     assert.ok(view.find('.history'), 'the timeline is open on load, with no click');
     assert.equal(view.findAll('.turn').length, 2);
+    assert.equal(count(view, '.top-row .history-toggle'), 0, 'and its control is not in the top row');
 
     // The chunk's UI constraint: no modal, no overlay. The editor is still mounted,
     // still on screen, and still editable while the history is open.
@@ -702,11 +703,15 @@ test('§4 the history is toggleable, and opening it never covers the draft', asy
     );
 
     // The control is now primarily a HIDE toggle, and it still toggles both ways.
-    await view.click(view.findByText('button', 'Hide history'));
-    assert.equal(count(view, '.history'), 0, 'it closes');
+    // The control moved to the History heading in chunk 15's layout pass and
+    // carries the turn count again (F50). Two turns in this ledger, so it says so.
+    await view.click(view.findByText('button', 'Hide History (2)'));
+    assert.equal(count(view, '.turn'), 0, 'the log closes');
+    assert.ok(view.find('.history-head h2'), 'but the heading stays, or there is no way back');
+    assert.ok(view.findByText('button', 'Show History (2)'), 'and the count is still legible while hidden');
 
-    await view.click(view.findByText('button', 'Show history'));
-    assert.ok(view.find('.history'), 'and opens again — the toggle did not become one-way');
+    await view.click(view.findByText('button', 'Show History (2)'));
+    assert.equal(view.findAll('.turn').length, 2, 'and it opens again — the toggle did not become one-way');
   } finally {
     await view.unmount();
   }
@@ -740,7 +745,7 @@ test('§4 restore from the history puts the restored text in the editor and move
   });
 
   try {
-    const clientCount = () => view.findByText('button', 'Export transcript').getAttribute('title');
+    const clientCount = () => view.findByText('button', 'Export Transcript').getAttribute('title');
     assert.match(clientCount(), /Save all 2 turns/, 'two turns before');
     // No click: the history is open on load since chunk 14.
 
@@ -797,7 +802,7 @@ test('§4 restoring to the turn the draft already is reports honestly and mints 
     assert.match(view.text(), /nothing to restore/);
     assert.doesNotMatch(view.text(), /restored turn 2 as turn/);
     assert.match(
-      view.findByText('button', 'Export transcript').getAttribute('title'),
+      view.findByText('button', 'Export Transcript').getAttribute('title'),
       /Save all 2 turns/,
       'the count did not move',
     );
@@ -853,7 +858,7 @@ test('§4 a turn opened from the history is text a human can copy out of', async
   });
 
   try {
-    await view.click(view.findByText('button', 'Open turn 1 read-only'));
+    await view.click(view.findByText('button', 'Open Turn 1 Read-Only'));
 
     const snapshot = view.find('.turn-snapshot pre');
     assert.equal(snapshot.textContent, LEDGER[0].snapshot, 'the whole draft as of turn 1');
@@ -923,7 +928,7 @@ test('the document list refreshes on every turn boundary, so its count cannot go
   // carries a per-document turn count, and still goes stale without a re-fetch.
   const listedCount = () => view.find('.top-drawer .doc-meta').textContent;
   // The client's own count, from `state.history`. The two must agree.
-  const clientCount = () => view.findByText('button', 'Export transcript').getAttribute('title');
+  const clientCount = () => view.findByText('button', 'Export Transcript').getAttribute('title');
 
   try {
     await view.click(view.find('.doc-name'));
@@ -1046,22 +1051,40 @@ test('a javascript: href never becomes a link, so opening one on click is not re
 
 // ── §12: the top row ────────────────────────────────────────────────────────────
 
-test('§12 the top row is the five named controls, in the spec\'s order, all lilac', async () => {
+test('§12 the top row is the four named controls, in the spec\'s order, all lilac', async () => {
   const view = await mountApp({ api: { load: async () => ({ draft: 'x\n', history: [{ turn_id: 1 }] }) } });
 
   try {
-    const row = view.findAll('.top-row button');
+    // `button, a`, not `button`: chunk 15's viewer control is an anchor, because
+    // it goes somewhere. Selecting only buttons would have let it be added — or
+    // removed — without this test noticing either way.
+    const row = view.findAll('.top-row button, .top-row a');
     assert.deepEqual(
       row.map((b) => b.textContent.trim()),
-      // "Hide history", not "Show history": chunk 14 opens the timeline on load,
-      // so the control's resting label is the one that closes it. Same control,
-      // same position, same §12 order.
-      ['Hide history', 'draft', '+ New document', 'Export transcript', 'Checkpoint'],
-      'Show/hide history · document name · + New document · Export transcript · Checkpoint',
+      // Chunk 15's layout pass took two controls OUT of this row: the history
+      // toggle went to the History heading and Checkpoint to the editor's
+      // bottom-right, each beside the thing it acts on. Both are asserted in
+      // their new homes below.
+      ['draft', '+ New Document', 'Export Transcript', 'View WordWright Doc'],
+      '§12 order: document name · + New Document · Export Transcript · View WordWright Doc',
     );
 
+    // Title Case, everywhere (§12). Asserted as a rule rather than by re-reading
+    // the array above, so a new control cannot arrive in sentence case. The
+    // document name is excluded: it is a slug the human typed, not a label, and
+    // §0.5 lowercases it on the way in.
+    for (const label of row
+      .filter((b) => !b.classList.contains('doc-name'))
+      .map((b) => b.textContent.trim())) {
+      const words = label.replace(/^\+\s*/, '').split(/\s+/);
+      assert.ok(
+        words.every((word) => /^[A-Z0-9]/.test(word) || ['a', 'an', 'the', 'of', 'to'].includes(word)),
+        `"${label}" is Title Case`,
+      );
+    }
+
     // §12: lilac = global and navigation controls, and the split is what a new
-    // control inherits from. A top-row button that is not lilac has left the split.
+    // control inherits from. A top-row control that is not lilac has left the split.
     assert.ok(
       row.every((b) => b.classList.contains('top-button')),
       'every control in the top row wears the lilac treatment',
@@ -1070,6 +1093,46 @@ test('§12 the top row is the five named controls, in the spec\'s order, all lil
     // Forest green is the primary action INSIDE a box, and nothing in the top row
     // may wear it — that is the other half of the same rule.
     assert.equal(count(view, '.top-row .submit'), 0);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('§12 the viewer control opens /view in a new tab, leaving the draft where it is', async () => {
+  const view = await mountApp({ api: { load: async () => ({ draft: 'x\n', history: [{ turn_id: 1 }] }) } });
+
+  try {
+    const link = view.findByText('a', 'View WordWright Doc');
+    assert.equal(link.getAttribute('href'), '/view');
+
+    // A NEW TAB, and this is the load-bearing assertion. Hand edits are
+    // uncommitted until Checkpoint (§3), so navigating away in this tab would
+    // silently discard whatever is typed and not yet ratified.
+    assert.equal(link.getAttribute('target'), '_blank');
+
+    // The capability token is in this page's URL. `noopener` keeps it out of the
+    // opened window's `opener`; `noreferrer` and index.html's document-wide
+    // referrer policy keep it out of the Referer header.
+    assert.match(link.getAttribute('rel'), /noopener/);
+    assert.match(link.getAttribute('rel'), /noreferrer/);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('the viewer control is there even when the address names no document', async () => {
+  // It is a global control: it works whether or not this slug exists, and the
+  // missing-document screen is exactly where someone might want to go read a
+  // transcript instead.
+  const view = await mountApp({
+    slug: 'nope',
+    api: { load: async () => { throw notFound('nope'); } },
+  });
+
+  try {
+    assert.ok(view.find('.missing'), 'the missing-document pane is showing');
+    assert.ok(view.findByText('a', 'View WordWright Doc'), 'and the viewer link with it');
+    assert.equal(count(view, '.checkpoint'), 0, 'while Checkpoint is correctly absent');
   } finally {
     await view.unmount();
   }
@@ -1099,7 +1162,7 @@ test('§12 only one drawer is open at a time, and neither one overlays the draft
 
   try {
     await view.click(view.find('.doc-name'));
-    await view.click(view.findByText('button', '+ New document'));
+    await view.click(view.findByText('button', '+ New Document'));
 
     assert.equal(view.findAll('.top-drawer').length, 1, 'opening one closes the other');
     assert.ok(view.find('.new-document-form'), 'and it is the one that was asked for');
@@ -1113,6 +1176,86 @@ test('§12 only one drawer is open at a time, and neither one overlays the draft
   } finally {
     await view.unmount();
   }
+});
+
+test('§12 Checkpoint sits under the editor, above the history, and does not float', async () => {
+  // The first attempt at this pinned the bar to the bottom of the viewport. It was
+  // reachable from anywhere and paid a band of the screen for the whole session to
+  // buy it — a control you meet once per checkpoint, held over a record it has
+  // nothing to do with. It sits in the draft's own territory now.
+  //
+  // Position is asserted in the DOM (order is real in jsdom) and the treatment
+  // against the stylesheet source, since jsdom applies no CSS.
+  const bar = rule('.draft-commit');
+  assert.doesNotMatch(bar, /position: (sticky|fixed|absolute)/, 'it does not float');
+  assert.match(bar, /justify-content: flex-end/, 'bottom-RIGHT of its surface');
+
+  const view = await mountApp({
+    api: { load: async () => ({ draft: 'x\n', history: [{ turn_id: 1 }] }) },
+  });
+
+  try {
+    const column = [...view.find('.editor-column').children].map((node) => node.className);
+    const draft = column.findIndex((c) => c.includes('draft ') || c === 'draft');
+    const commit = column.findIndex((c) => c.includes('draft-commit'));
+    const history = column.findIndex((c) => c.includes('history'));
+
+    assert.ok(draft >= 0 && commit >= 0 && history >= 0, `all three present: ${column.join(' | ')}`);
+    assert.ok(draft < commit, 'Checkpoint comes after the editor');
+    assert.ok(
+      commit < history,
+      'and BEFORE the history — the separator that opens the record is below it',
+    );
+
+    // The rule it must stay above is the history's own top border.
+    assert.match(rule('.history'), /border-top: 1px solid var\(--line\)/);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('the history is on screen at first paint, without scrolling', () => {
+  // The record is the feature nobody arrives knowing about. A UI that puts it below
+  // the fold makes discovering it something you have to already want — so the
+  // editor is sized to leave the History heading and the top of the newest turn
+  // visible on load. Measured in a real browser (see reports/chunk-15.md §10);
+  // pinned here against the source, because jsdom has no layout.
+  const editor = rule('.editor .tiptap');
+
+  // A cap, not just a floor. `min-height` alone does nothing on a draft with real
+  // text in it — the box is as tall as its content — so on any document anyone has
+  // actually written the history would go back under the fold.
+  assert.match(editor, /max-height: max\(/, 'the editor is capped');
+  assert.match(editor, /overflow-y: auto/, 'and scrolls inside itself');
+
+  // The subtrahend is fixed furniture (masthead, toolbar, the Checkpoint row, the
+  // history's own margin), which does not scale with the viewport — so it comes off
+  // as a length, not a percentage. If this becomes `Nvh` alone, the promise breaks
+  // on tall screens and short ones in opposite directions.
+  assert.match(editor, /calc\(100vh - \d+rem\)/, 'sized against the fixed furniture above it');
+
+  // And the floor, so a short screen keeps a usable writing surface rather than
+  // spending it all on the record.
+  assert.match(editor, /min-height: max\(\d+rem,/);
+});
+
+test('§12 the three commit actions are one treatment, declared once', () => {
+  // Submit commits the prompt, Add commits a standing rule, Checkpoint commits the
+  // draft. Same act, same surface position, same green — and that has to be ONE
+  // rule, or three greens drift apart one edit at a time.
+  const grouped = /\.submit,\n\.rule-submit,\n\.checkpoint \{([^}]*)\}/.exec(STYLESHEET);
+  assert.ok(grouped, 'the three share a single selector');
+  assert.match(grouped[1], /background: var\(--accent\)/, 'forest green');
+  assert.match(grouped[1], /color: #fff/);
+
+  // None of them may have a second, divergent fill of its own.
+  for (const selector of ['.rule-submit', '.checkpoint-marked']) {
+    assert.doesNotMatch(rule(selector), /background: (#fff|white)/, `${selector} has no white fill`);
+  }
+
+  // And the split holds in the other direction: lilac is navigation, and nothing
+  // in the top row commits anything.
+  assert.doesNotMatch(rule('.top-button'), /var\(--accent\)/, 'the lilac family is not green');
 });
 
 test('§12 Checkpoint carries the uncommitted-edits signal in the button itself', async () => {
@@ -1161,7 +1304,7 @@ test('§4 Export transcript saves the whole ledger as JSON', async () => {
   });
 
   try {
-    await view.click(view.findByText('button', 'Export transcript'));
+    await view.click(view.findByText('button', 'Export Transcript'));
 
     assert.equal(view.saved.length, 1, 'one file, from one click');
     const { filename, data } = view.saved[0];
@@ -1196,7 +1339,7 @@ test('§4 a document with no turns has no transcript, and the control says so', 
   const view = await mountApp({ api: { load: async () => ({ draft: '', history: [] }) } });
 
   try {
-    const button = view.findByText('button', 'Export transcript');
+    const button = view.findByText('button', 'Export Transcript');
     assert.equal(button.disabled, true, 'nothing to export');
     assert.match(button.getAttribute('title'), /No turns yet/);
 
@@ -1290,7 +1433,7 @@ test('§4 a transcript carries the model\'s speech, because the note is on the t
   });
 
   try {
-    await view.click(view.findByText('button', 'Export transcript'));
+    await view.click(view.findByText('button', 'Export Transcript'));
     const { data } = view.saved[0];
 
     assert.equal(data.turns[1].note, 'I read this as a copy edit, not a reframe.');
@@ -1703,8 +1846,14 @@ test('§12 the rail is reachable at any scroll depth, and still overlays nothing
   // It stays in column 2. The chunk-08 bug was the history spanning 1 / -1 and
   // sliding UNDER the sticky rail because they shared columns; these two are
   // pinned to different columns so spanning rows cannot make them overlap.
+  //
+  // The left-hand pin moved to `.editor-column` in chunk 15's layout pass: the
+  // draft and the history are inside one wrapper now, so the wrapper is the grid
+  // item and the thing that has to stay in column 1. The guarantee is the same
+  // one — nothing in the left column may span into the rail's.
   assert.match(railRule, /grid-column: 2/);
-  assert.match(rule('.history'), /grid-column: 1/);
+  assert.match(rule('.editor-column'), /grid-column: 1/);
+  assert.doesNotMatch(rule('.editor-column'), /grid-row: 1 \/ -1/, 'and it does not span into the rail');
 
   // §12 forbids anything overlaying the draft. Sticky is not fixed, and the rail
   // must not have become an overlay while nobody was looking.

@@ -158,35 +158,37 @@ test('F37: bound to loopback, the default token works exactly as before', async 
 });
 
 test('F37: `/` never sends a person to a page that will refuse them', async () => {
-  // Locally it is a convenience. On a deployment the same redirect would land on
-  // the 403 above — a dead end reached by following the app's own link.
-  // UNCONDITIONAL, both directions. The route must not depend on whether
-  // `client/dist` happens to exist: a fresh clone and a deploy whose build step
-  // failed are exactly the situations in which someone lands on `/` needing to
-  // be told something. This assertion is what caught it.
-  const local = await serve({ host: '127.0.0.1' });
-  try {
-    const response = await local.get('/', { redirect: 'manual' });
-    assert.equal(response.status, 302, 'locally it is a shortcut into the dev namespace');
-    assert.match(response.headers.get('location') ?? '', new RegExp(DEFAULT_TOKEN));
-  } finally {
-    await local.close();
-  }
+  // REWRITTEN IN CHUNK 15, and the guarantee got stronger rather than weaker.
+  //
+  // `/` used to redirect into the development namespace on a loopback binding and
+  // print a plain-text explainer everywhere else. It is now the landing page (§12b)
+  // on EVERY binding: no redirect at all, so there is no binding on which
+  // following the app's own link can land on the 403 F37 exists to produce.
+  //
+  // Asserted without depending on the binding OR on the build. A built tree serves
+  // the landing bundle; a fresh clone or a failed build serves the plain-text
+  // fallback, which is mounted unconditionally for exactly that reason (F89). Both
+  // are correct answers and neither may redirect or leak a token.
+  for (const host of ['127.0.0.1', '0.0.0.0']) {
+    const server = await serve({ host });
+    try {
+      const response = await server.get('/', { redirect: 'manual' });
 
-  const deployed = await serve({ host: '0.0.0.0' });
-  try {
-    const response = await deployed.get('/', { redirect: 'manual' });
-    assert.notEqual(response.status, 302, 'no redirect into a namespace that is refused');
-    assert.equal(response.status, 404);
+      assert.notEqual(response.status, 302, `${host}: / never redirects into a namespace`);
+      assert.ok(
+        [200, 503].includes(response.status),
+        `${host}: / answers with the landing page or the no-build explainer, got ${response.status}`,
+      );
 
-    const text = await response.text();
-    assert.match(text, /capability links/i, 'it explains itself');
-    assert.doesNotMatch(text, /Cannot GET/, 'never Express\u2019s default page');
-    // §0.5: nothing enumerates namespaces, including the one page a stranger
-    // is most likely to reach.
-    assert.doesNotMatch(text, new RegExp(DEFAULT_TOKEN), 'and it hands out no token');
-  } finally {
-    await deployed.close();
+      const text = await response.text();
+      assert.doesNotMatch(text, /Cannot GET/, `${host}: never Express\u2019s default page`);
+      // §0.5: nothing enumerates namespaces, including the one page a stranger is
+      // most likely to reach. This is the half of F37 that has not changed at all.
+      assert.doesNotMatch(text, new RegExp(DEFAULT_TOKEN), `${host}: it hands out no token`);
+      assert.doesNotMatch(text, /[0-9a-f]{32}/, `${host}: nor any other token`);
+    } finally {
+      await server.close();
+    }
   }
 });
 

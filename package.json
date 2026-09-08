@@ -1,6 +1,6 @@
 {
   "name": "hybrid-writing-ide",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "new-token": "node scripts/new-token.js",
     "live-check": "node scripts/live-check.js",
     "budget": "node scripts/live-check.js --budget",
-    "spend-report": "node scripts/spend-report.js"
+    "spend-report": "node scripts/spend-report.js",
+    "users-report": "node scripts/users-report.js"
   },
   "engines": {
     "node": ">=22"

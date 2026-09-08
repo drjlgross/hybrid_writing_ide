@@ -127,7 +127,7 @@ export function Viewer({
   // input by ref. The label is the click target and the keyboard target, so this
   // works from a keyboard with no handler of ours in the path.
   const picker = h('label', { key: 'pick', className: 'file-pick' }, [
-    h('span', { key: 'label' }, transcript || error ? 'Open a different transcript' : 'Open a transcript'),
+    h('span', { key: 'label' }, transcript || error ? 'Open a Different Transcript' : 'Open a Transcript'),
     h('input', {
       key: 'input',
       type: 'file',

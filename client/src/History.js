@@ -193,7 +193,7 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore, tabl
             // no-op says so afterwards rather than being blocked beforehand.
             onClick: () => onRestore(turn.turn_id),
           },
-          'Restore to this turn',
+          'Restore to This Turn',
         )
       : null,
   ]);
@@ -420,7 +420,7 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore, tabl
           'aria-expanded': open,
           onClick: onToggle,
         },
-        open ? `Hide turn ${turn.turn_id}` : `Open turn ${turn.turn_id} read-only`,
+        open ? `Hide Turn ${turn.turn_id}` : `Open Turn ${turn.turn_id} Read-Only`,
       ),
       snapshot,
     ],
@@ -445,6 +445,23 @@ export function History({
   busy = false,
   tables = null,
   emptyMessage = 'Every change — yours and the model\u2019s — will be recorded here, turn by turn.',
+  // The show/hide control lives HERE now, beside the heading, rather than in the
+  // top row (§12, chunk 15's layout pass). Two consequences follow and both are
+  // load-bearing:
+  //
+  //   - THE HEAD ALWAYS RENDERS. Only the turn log collapses. A toggle inside the
+  //     thing it toggles would disappear with it and there would be no way back.
+  //   - THE COUNT IS ON THE BUTTON. F50 recorded that the toggle lost its turn
+  //     count when it moved to the top row; it is back, and it has to be on the
+  //     control because the "N turns, newest first" line below is part of what
+  //     collapses. Hidden, the button is the only thing left saying how much
+  //     record there is.
+  //
+  // `open` is undefined for a caller that does not toggle at all (the /view
+  // transcript reader), which renders the log with no control — an archived
+  // transcript has nothing to hide it from.
+  open = true,
+  onToggle,
 }) {
   const [openTurn, setOpenTurn] = useState(null);
 
@@ -456,18 +473,42 @@ export function History({
     .map((turn, index) => ({ turn, previous: history[index - 1]?.snapshot ?? '' }))
     .reverse();
 
+  const count = `${history.length} turn${history.length === 1 ? '' : 's'}`;
+
   return h('section', { className: 'history', 'aria-label': 'Turn history' }, [
     h('div', { key: 'head', className: 'history-head' }, [
       h('h2', { key: 'h' }, 'History'),
-      h(
-        'p',
-        { key: 'note', className: 'hint' },
-        `${history.length} turn${history.length === 1 ? '' : 's'}, newest first. ` +
-          'Diffs are computed from the snapshots each time you look; they are never stored.',
-      ),
+      // Immediately to the right of the heading, which is the one place a reader
+      // is already looking when they want more or less of this.
+      onToggle
+        ? h(
+            'button',
+            {
+              key: 'toggle',
+              type: 'button',
+              className: 'top-button history-toggle',
+              'aria-expanded': open,
+              onClick: onToggle,
+            },
+            `${open ? 'Hide' : 'Show'} History (${history.length})`,
+          )
+        : null,
     ]),
 
-    history.length === 0
+    // The provenance line goes with the log: "diffs are computed each time you
+    // look" is a sentence about something you can currently look at.
+    open
+      ? h(
+          'p',
+          { key: 'note', className: 'hint history-note' },
+          `${count}, newest first. ` +
+            'Diffs are computed from the snapshots each time you look; they are never stored.',
+        )
+      : null,
+
+    !open
+      ? null
+      : history.length === 0
       ? h('p', { key: 'none', className: 'hint history-empty' }, emptyMessage)
       : h(
           'ol',
