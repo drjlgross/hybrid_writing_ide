@@ -1,19 +1,39 @@
 /**
- * Entry point. The address is `/t/{token}/{slug}` (CLAUDE.md §0.5); the token is
- * read from the URL and handed to the API layer, which sends it on every call.
+ * Entry point. Two pages come out of this one bundle.
+ *
+ * `/t/{token}/{slug}` is the app (CLAUDE.md §0.5); the token is read from the URL
+ * and handed to the API layer, which sends it on every call.
+ *
+ * `/view` is the export viewer (§ The export viewer): no token, no namespace, no
+ * API beyond the version in the footer. Both tests come from src/addressing.js,
+ * which is where the server gets its copy too — one definition of which path is
+ * which, rather than two that agree today.
+ *
+ * One bundle rather than a second Vite entry: the viewer reuses the history
+ * components, so a separate build would ship most of the same code twice and give
+ * the two copies room to disagree.
  */
 
 import { createRoot } from 'react-dom/client';
 
-import { DEFAULT_TOKEN, documentAddress, parseDocumentAddress } from '../../src/addressing.js';
+import {
+  DEFAULT_TOKEN,
+  documentAddress,
+  isViewerAddress,
+  parseDocumentAddress,
+} from '../../src/addressing.js';
 import { App } from './App.js';
+import { Viewer } from './Viewer.js';
 import { h } from './h.js';
 import './styles.css';
 
-const { token, slug } = parseDocumentAddress(window.location.pathname);
+const path = window.location.pathname;
+const { token, slug } = parseDocumentAddress(path);
 const root = createRoot(document.getElementById('root'));
 
-if (token) {
+if (isViewerAddress(path)) {
+  root.render(h(Viewer, {}));
+} else if (token) {
   root.render(h(App, { token, slug }));
 } else {
   // A malformed token is rejected, never repaired (§0.5): a sanitized token is a

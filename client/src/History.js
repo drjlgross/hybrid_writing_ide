@@ -30,6 +30,24 @@
  *
  *    The human's instruction is none of the three: it is the turn's provenance,
  *    and it sits in the record header with the author and the timestamp.
+ *
+ * TWO CALLERS, ONE COMPONENT (chunk 14). The live app renders this below the
+ * editor; `/view` renders it against a transcript loaded from a file. The
+ * difference is carried by two props and nothing else:
+ *
+ *   `onRestore` absent  →  no Restore control. Read-only is the ABSENCE of the
+ *                          callback, not a boolean beside it: a `readOnly` flag
+ *                          could be false while `onRestore` was missing, and the
+ *                          button would render and then throw on click.
+ *   `tables` present    →  each turn also shows its `segments` and resolves its
+ *                          `context_ref` / `rules_ref` against the export's own
+ *                          tables (§4). The live app passes none, so the live
+ *                          history is unchanged by chunk 14 — surfacing
+ *                          `segments` in the working surface is step 15's job
+ *                          (§2.2, §9 S2), and doing it here would jump that
+ *                          queue. In an archived transcript the refs are the only
+ *                          record of what the model was looking at, and nothing
+ *                          else can recover it.
  */
 
 import { useMemo, useState } from 'react';
@@ -105,13 +123,28 @@ function diffElements(regions) {
 }
 
 /**
+ * One record from a table an export carried, or a placeholder naming the id when
+ * the table does not have it.
+ *
+ * An unresolved id is SHOWN, not skipped. A transcript whose turn cites a context
+ * file the export did not carry is a fact about that transcript, and dropping the
+ * line would render the turn as though it had cited nothing.
+ */
+function refRow(id, record, describe) {
+  return record
+    ? describe(record)
+    : [h('span', { key: 'id', className: 'ref-id' }, id), ' — not in this export'];
+}
+
+/**
  * One turn: the record header, the model's speech, the model's edits, and the
  * read-only snapshot.
  *
  * @param {{turn: object, previous: string, isCurrent: boolean, open: boolean,
- *   busy: boolean, onToggle: () => void, onRestore: (id: number) => void}} props
+ *   busy: boolean, onToggle: () => void, onRestore?: (id: number) => void,
+ *   tables?: {context: Map<string, object>, rules: Map<string, object>}}} props
  */
-function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
+function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore, tables = null }) {
   const isAi = turn.author === 'ai';
   // The diff itself, from the two full snapshots and nothing else. Memoized on the
   // snapshot pair, so opening a turn or re-rendering the panel does not re-diff.
@@ -132,23 +165,37 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
     ),
     h('span', { key: 'id', className: 'turn-id' }, `Turn ${turn.turn_id}`),
     h('time', { key: 'time', className: 'turn-time', dateTime: turn.timestamp }, readableTime(turn.timestamp)),
+    // The last turn in the ledger. In the app that IS the draft on screen; in a
+    // transcript opened at /view there is no live draft anywhere — the session
+    // may be on another machine, or over — so the same marker says a different
+    // and still true thing rather than being dropped, because "which turn is the
+    // end of this session" is worth knowing in both.
     isCurrent
-      ? h('span', { key: 'current', className: 'turn-current' }, 'the live draft')
+      ? h(
+          'span',
+          { key: 'current', className: 'turn-current' },
+          tables ? 'where the draft stood at export' : 'the live draft',
+        )
       : null,
-    h(
-      'button',
-      {
-        key: 'restore',
-        type: 'button',
-        className: 'tool turn-restore',
-        disabled: busy,
-        // §4: one action, no confirmation. Restoring appends a turn; it destroys
-        // nothing, so there is nothing to warn about — and a restore that is a
-        // no-op says so afterwards rather than being blocked beforehand.
-        onClick: () => onRestore(turn.turn_id),
-      },
-      'Restore to this turn',
-    ),
+    // No callback, no control. `/view` has no draft to restore INTO — the
+    // transcript is a file, and the session it came from may be on another
+    // machine or may not exist any more.
+    onRestore
+      ? h(
+          'button',
+          {
+            key: 'restore',
+            type: 'button',
+            className: 'tool turn-restore',
+            disabled: busy,
+            // §4: one action, no confirmation. Restoring appends a turn; it destroys
+            // nothing, so there is nothing to warn about — and a restore that is a
+            // no-op says so afterwards rather than being blocked beforehand.
+            onClick: () => onRestore(turn.turn_id),
+          },
+          'Restore to this turn',
+        )
+      : null,
   ]);
 
   // The instruction that caused the turn. Provenance, not commentary — it is the
@@ -246,6 +293,99 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
     ],
   );
 
+  // ── WHAT THE MODEL WAS WORKING FROM (§2.2 segments, §3 refs) ─────────────────
+  // Rendered only for an archived transcript — see the two-callers note at the
+  // top of this file. Three separate lists rather than one, because a segment is
+  // the model's reading of the prompt, a context ref is a file the human
+  // attached, and a rule ref is a standing instruction; they answer different
+  // questions and blending them would make a turn look like it had one source.
+  const segments = Array.isArray(turn.segments) ? turn.segments : [];
+  const contextRefs = Array.isArray(turn.context_ref) ? turn.context_ref : [];
+  const rulesRefs = Array.isArray(turn.rules_ref) ? turn.rules_ref : [];
+
+  const provenance =
+    tables && (segments.length > 0 || contextRefs.length > 0 || rulesRefs.length > 0)
+      ? h(
+          'div',
+          {
+            key: 'provenance',
+            className: 'turn-provenance',
+            'aria-label': `What turn ${turn.turn_id} was working from`,
+          },
+          [
+            segments.length > 0
+              ? h('div', { key: 'segs', className: 'turn-segments' }, [
+                  // §2.2: the model's decomposition of the prompt, stated before
+                  // acting. In a live session this is step 15's to surface; in a
+                  // transcript it is the only account of how the instruction was
+                  // read, and a question read as an edit is visible here or
+                  // nowhere.
+                  h('span', { key: 'k', className: 'record-label' }, 'Read the prompt as'),
+                  h(
+                    'ul',
+                    { key: 'v', className: 'segment-list' },
+                    segments.map((segment, index) =>
+                      h('li', { key: segment?.id ?? `s${index}` }, [
+                        h('span', { key: 'kind', className: 'segment-kind' }, segment?.kind ?? 'segment'),
+                        h('span', { key: 'took', className: 'segment-took' }, segment?.took ?? ''),
+                      ]),
+                    ),
+                  ),
+                ])
+              : null,
+
+            contextRefs.length > 0
+              ? h('div', { key: 'ctx', className: 'turn-refs' }, [
+                  h('span', { key: 'k', className: 'record-label' }, 'Context in scope'),
+                  h(
+                    'ul',
+                    { key: 'v', className: 'ref-list' },
+                    contextRefs.map((id) =>
+                      h(
+                        'li',
+                        { key: id },
+                        refRow(id, tables.context.get(id), (file) => [
+                          h('span', { key: 'name', className: 'ref-name' }, file.filename ?? id),
+                          // §0.5: metadata only. An export carries what a file WAS
+                          // and what she said it was for; the bytes are never in it,
+                          // so there is nothing here to open.
+                          file.description
+                            ? h('span', { key: 'desc', className: 'ref-desc' }, file.description)
+                            : null,
+                        ]),
+                      ),
+                    ),
+                  ),
+                ])
+              : null,
+
+            rulesRefs.length > 0
+              ? h('div', { key: 'rules', className: 'turn-refs' }, [
+                  h('span', { key: 'k', className: 'record-label' }, 'Standing rules in scope'),
+                  h(
+                    'ul',
+                    { key: 'v', className: 'ref-list' },
+                    rulesRefs.map((id) =>
+                      h(
+                        'li',
+                        { key: id },
+                        refRow(id, tables.rules.get(id), (rule) => [
+                          h('span', { key: 'text', className: 'ref-name' }, rule.text ?? id),
+                          // §0.11: every rule carries a scope, and a rule read
+                          // without its scope is a different rule.
+                          rule.scope
+                            ? h('span', { key: 'scope', className: 'ref-desc' }, `scope: ${rule.scope}`)
+                            : null,
+                        ]),
+                      ),
+                    ),
+                  ),
+                ])
+              : null,
+          ],
+        )
+      : null;
+
   // ── the read-only snapshot (§4) ───────────────────────────────────────────────
   // A <pre>, never an editor. §4 requires the text be selectable and copyable, and a
   // reader must never mistake it for the live draft — so it is plain, labelled, and
@@ -270,6 +410,7 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
       speech,
       reported,
       changes,
+      provenance,
       h(
         'button',
         {
@@ -290,9 +431,21 @@ function Turn({ turn, previous, isCurrent, open, busy, onToggle, onRestore }) {
  * The timeline (§4). Newest first — the interesting end of a writing session is the
  * one you just made.
  *
- * @param {{history: object[], onRestore: (id: number) => void, busy?: boolean}} props
+ * @param {{history: object[], onRestore?: (id: number) => void, busy?: boolean,
+ *   tables?: {context: Map<string, object>, rules: Map<string, object>},
+ *   emptyMessage?: string}} props
+ *   See the two-callers note at the top of this file for `onRestore` and `tables`.
+ *   `emptyMessage` exists because "no turns yet" means two different things: in a
+ *   live document it is an invitation, and in a loaded transcript it is a fact
+ *   about a session that recorded nothing.
  */
-export function History({ history = [], onRestore, busy = false }) {
+export function History({
+  history = [],
+  onRestore,
+  busy = false,
+  tables = null,
+  emptyMessage = 'Every change — yours and the model\u2019s — will be recorded here, turn by turn.',
+}) {
   const [openTurn, setOpenTurn] = useState(null);
 
   const liveTurnId = history.length > 0 ? history[history.length - 1].turn_id : null;
@@ -315,7 +468,7 @@ export function History({ history = [], onRestore, busy = false }) {
     ]),
 
     history.length === 0
-      ? h('p', { key: 'none', className: 'hint' }, 'No turns yet. Checkpoint, or send an instruction, and this fills in.')
+      ? h('p', { key: 'none', className: 'hint history-empty' }, emptyMessage)
       : h(
           'ol',
           { key: 'list', className: 'turn-list' },
@@ -329,6 +482,7 @@ export function History({ history = [], onRestore, busy = false }) {
               busy,
               onToggle: () => setOpenTurn((was) => (was === turn.turn_id ? null : turn.turn_id)),
               onRestore,
+              tables,
             }),
           ),
         ),

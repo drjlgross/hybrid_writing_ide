@@ -7,6 +7,15 @@ file exists, now that the tool is deployed and someone else may be holding a lin
 
 Entries are newest first.
 
+## 0.1.2 — 2026-09-08 (behavior change)
+
+Chunk 14. A read-only export viewer at `/view`: it renders a transcript JSON entirely
+in the visitor's own browser — no upload, no storage, no namespace access — leading
+with a Current Draft card holding the last turn's snapshot, then the full turn log
+with diffs, notes, segments and resolved context and rule references. And the history
+view now renders open by default in the app; the Show/hide control becomes primarily
+a hide toggle. Both are visible to anyone already holding a link.
+
 ## 0.1.1 — 2026-09-06 (behavior change)
 
 The product has a name: WordWright. The masthead is the wordmark in Allison over

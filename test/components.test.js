@@ -684,11 +684,10 @@ test('§4 the history is toggleable, and opening it never covers the draft', asy
   });
 
   try {
-    assert.equal(count(view, '.history'), 0, 'closed by default — the draft is what you came for');
-
-    await view.click(view.findByText('button', 'Show history'));
-
-    assert.ok(view.find('.history'), 'the timeline opens');
+    // Chunk 14 inverted this: the timeline renders OPEN on load. The record is
+    // the product, and a ledger you have to decide to open is one that catches
+    // an unasked-for rewording only when you were already suspicious.
+    assert.ok(view.find('.history'), 'the timeline is open on load, with no click');
     assert.equal(view.findAll('.turn').length, 2);
 
     // The chunk's UI constraint: no modal, no overlay. The editor is still mounted,
@@ -702,8 +701,12 @@ test('§4 the history is toggleable, and opening it never covers the draft', asy
       'the live draft is untouched by looking at the history',
     );
 
+    // The control is now primarily a HIDE toggle, and it still toggles both ways.
     await view.click(view.findByText('button', 'Hide history'));
-    assert.equal(count(view, '.history'), 0, 'and it closes again');
+    assert.equal(count(view, '.history'), 0, 'it closes');
+
+    await view.click(view.findByText('button', 'Show history'));
+    assert.ok(view.find('.history'), 'and opens again — the toggle did not become one-way');
   } finally {
     await view.unmount();
   }
@@ -739,7 +742,7 @@ test('§4 restore from the history puts the restored text in the editor and move
   try {
     const clientCount = () => view.findByText('button', 'Export transcript').getAttribute('title');
     assert.match(clientCount(), /Save all 2 turns/, 'two turns before');
-    await view.click(view.findByText('button', 'Show history'));
+    // No click: the history is open on load since chunk 14.
 
     // One control per turn; the oldest entry is last, newest first.
     const buttons = view.findAll('.turn-restore');
@@ -788,7 +791,6 @@ test('§4 restoring to the turn the draft already is reports honestly and mints 
   });
 
   try {
-    await view.click(view.findByText('button', 'Show history'));
     await view.click(view.findAll('.turn-restore')[0]); // the live turn
     await view.flush();
 
@@ -816,7 +818,6 @@ test('§0.2 a restore in flight locks the draft, and says the reason is not the 
   });
 
   try {
-    await view.click(view.findByText('button', 'Show history'));
     await view.click(view.findAll('.turn-restore')[1]);
 
     assert.ok(view.find('.lock-veil'), 'the draft is read-only while its content is being replaced');
@@ -852,7 +853,6 @@ test('§4 a turn opened from the history is text a human can copy out of', async
   });
 
   try {
-    await view.click(view.findByText('button', 'Show history'));
     await view.click(view.findByText('button', 'Open turn 1 read-only'));
 
     const snapshot = view.find('.turn-snapshot pre');
@@ -940,7 +940,6 @@ test('the document list refreshes on every turn boundary, so its count cannot go
     assert.match(listedCount(), /^3 turns$/, 'an AI turn moved the listing');
     assert.match(clientCount(), /Save all 3 turns/);
 
-    await view.click(view.findByText('button', 'Show history'));
     await view.click(view.findAll('.turn-restore')[2]);
     await view.flush();
     assert.match(listedCount(), /^4 turns$/, 'a restore moved the listing');
@@ -1054,7 +1053,10 @@ test('§12 the top row is the five named controls, in the spec\'s order, all lil
     const row = view.findAll('.top-row button');
     assert.deepEqual(
       row.map((b) => b.textContent.trim()),
-      ['Show history', 'draft', '+ New document', 'Export transcript', 'Checkpoint'],
+      // "Hide history", not "Show history": chunk 14 opens the timeline on load,
+      // so the control's resting label is the one that closes it. Same control,
+      // same position, same §12 order.
+      ['Hide history', 'draft', '+ New document', 'Export transcript', 'Checkpoint'],
       'Show/hide history · document name · + New document · Export transcript · Checkpoint',
     );
 

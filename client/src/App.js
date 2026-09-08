@@ -24,6 +24,7 @@ import { documentAddress } from '../../src/addressing.js';
 import { buildExtensions } from '../../src/tiptap-config.js';
 import { serializeEditorMarkdown } from '../../src/tiptap-serialize.js';
 import { createApi } from './api.js';
+import { Colophon, Wordmark } from './Chrome.js';
 import { createDraftSession, initialSessionState } from './draft-session.js';
 import { History } from './History.js';
 import { ModelResponse } from './ModelResponse.js';
@@ -64,8 +65,21 @@ export function App({
   // looking at and the stored draft lags it by a turn.
   const [empty, setEmpty] = useState(true);
 
-  // §4: "a toggleable timeline". Off by default — the draft is what you came for.
-  const [showHistory, setShowHistory] = useState(false);
+  /**
+   * §4: "a toggleable timeline", and since chunk 14 it renders OPEN.
+   *
+   * The record is the product. A ledger nobody opens cannot do the job §4 gives
+   * it — catching the model quietly rewording a passage it was not asked to
+   * touch — and the toggle made looking at it a thing you had to decide to do.
+   * Open by default, the diff of the turn that just happened is simply there.
+   *
+   * The control is unchanged and still says "Hide history"; it is now primarily a
+   * hide toggle. PER SESSION ONLY: this is `useState`, so a reload opens it again.
+   * Deliberately no localStorage and no per-document setting — a stored
+   * preference is a second place the UI can be wrong, and §0.5 has no room for a
+   * per-visitor setting that is not in the document JSON.
+   */
+  const [showHistory, setShowHistory] = useState(true);
 
   /**
    * The version the SERVER is running (§ Versioning), for the footer.
@@ -274,12 +288,10 @@ export function App({
 
   return h('div', { className: `app${state.locked ? ' locked' : ''}` }, [
     h('header', { key: 'masthead', className: 'masthead' }, [
-      // The product name, and the one line that says what it is for. Two
-      // elements rather than one so the two faces (§ the stylesheet's
-      // --wordmark-font and --mono-font) can be declared separately and the
-      // subtitle can be read by itself.
-      h('h1', { key: 'title' }, 'WordWright'),
-      h('p', { key: 'subtitle', className: 'wordmark-subtitle' }, 'Enabling Human Judgment'),
+      // The product name and the line that says what it is for. Shared with
+      // /view (see Chrome.js) so the lockup exists once — a wordmark that exists
+      // twice is one that will eventually say two different things.
+      h(Wordmark, { key: 'lockup' }),
       topBar,
 
       // §0.5's capability disclosure, ON THE SURFACE (F51, resolved chunk 11).
@@ -354,14 +366,11 @@ export function App({
     // at the bottom, quiet, because it is for the moment something has gone wrong
     // and for no other moment. A report that cannot name the version it came from
     // costs a round trip to establish what was running.
-    h('footer', { key: 'footer', className: 'colophon' }, [
-      // Named, not a bare number: a version pasted into a bug report has to say
-      // what it is the version OF, and this string is the whole of what the
-      // reporter copies. The number itself still comes from /health — see the
-      // `version` state above — so it reports the running deployment rather than
-      // whatever was baked into this bundle at build time.
-      h('span', { key: 'v' }, version ? `WordWright v${version}` : 'WordWright — version unavailable'),
-    ]),
+    // Named, not a bare number: a version pasted into a bug report has to say what
+    // it is the version OF. The number comes from /health — see the `version`
+    // state above — so it reports the running deployment rather than whatever was
+    // baked into this bundle at build time. Shared with /view.
+    h(Colophon, { key: 'footer', version }),
   ]);
 }
 

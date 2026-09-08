@@ -18,7 +18,7 @@ import express from 'express';
 import { AiResponseError } from './ai-response.js';
 import { runAiEdit } from './ai-edit.js';
 import { ModelApiError, createModelCaller } from './anthropic-client.js';
-import { DEFAULT_SLUG, DEFAULT_TOKEN, documentAddress, resolveSlug } from './addressing.js';
+import { DEFAULT_SLUG, DEFAULT_TOKEN, documentAddress, isClientPath, resolveSlug } from './addressing.js';
 import { DEFAULT_TOKEN_REFUSED, allowsDefaultToken } from './binding.js';
 import {
   ContextError,
@@ -539,8 +539,23 @@ export function createServer({ callModel, root = DOCUMENTS_ROOT, host = '127.0.0
     // Every /t/… address is the same single-page app; the token and slug are read
     // from the URL by the client. Written as a middleware rather than a route
     // pattern so no path-to-regexp dialect question arises about the optional slug.
+    //
+    // `/view` is the export viewer (chunk 14) and comes out of the same bundle,
+    // which is why it is the same sendFile and not a second one. It is served,
+    // not routed: the client reads the pathname and renders a different page.
+    //
+    // IT CANNOT COLLIDE WITH ANYTHING, and each reason is structural rather than
+    // a matter of ordering:
+    //   - `/api/t/:token` is mounted above and owns everything under /api.
+    //   - a /t/ address always begins `/t/`, so no token-shaped path can also be
+    //     `/view`; and §0.5's token is 32 hex characters, which `view` is not.
+    //   - express.static ran first, so a real file called `view` would already
+    //     have been served — there is none, and if one appeared the static
+    //     handler winning would be the correct outcome.
+    // Nothing here reads a token, and the viewer never asks the server for a
+    // document: the transcript it renders is a file in the visitor's browser.
     app.use((req, res, next) => {
-      if (req.method !== 'GET' || !/^\/t\/[^/]+(\/[^/]*)?\/?$/.test(req.path)) {
+      if (req.method !== 'GET' || !isClientPath(req.path)) {
         next();
         return;
       }

@@ -1,7 +1,9 @@
 /**
- * How a document is addressed (CLAUDE.md §0.5).
+ * How a document is addressed (CLAUDE.md §0.5), and which paths belong to the
+ * client at all.
  *
- *     /t/{token}/{slug}
+ *     /t/{token}/{slug}    the app
+ *     /view                the export viewer (chunk 14)
  *
  * A token is a capability, not an account: whoever holds the link has full access
  * to that namespace, and there is nothing else to check. This is a filing system
@@ -70,4 +72,40 @@ export function parseDocumentAddress(pathname) {
   if (!isValidToken(parts[1])) return { token: null, slug: DEFAULT_SLUG };
 
   return { token: parts[1], slug: resolveSlug(parts[2]) };
+}
+
+/**
+ * The export viewer's address (CLAUDE.md § The export viewer).
+ *
+ * Defined HERE, beside the document address, because the one thing this pair has
+ * to guarantee is that they never overlap — and two files each carrying half of
+ * that guarantee is how an overlap gets introduced. Both the server (which paths
+ * serve the bundle) and the client entry (which page to render) read these, so
+ * there is one answer rather than two that agree today.
+ *
+ * It cannot collide with a document address by construction: every document
+ * address begins `/t/`, and §0.5's token is 32 hex characters, which `view` is
+ * not. The viewer reads no token and reaches no namespace.
+ */
+export const VIEWER_ADDRESS = '/view';
+
+/** `/view` or `/view/`, and nothing else — not `/viewer`, not `/view/anything`. */
+export function isViewerAddress(pathname) {
+  return /^\/view\/?$/.test(String(pathname ?? ''));
+}
+
+/**
+ * Does this path belong to the single-page client?
+ *
+ * Deliberately LOOSER than `parseDocumentAddress` on the token: `/t/nonsense/x`
+ * is served the bundle so the client can render "that link does not name a
+ * document" (§0.5 — rejected, never repaired). A 404 from Express would be the
+ * server refusing to explain a link someone was handed.
+ *
+ * Not an API path and not a static asset: `/api/…` is mounted before this is
+ * consulted, and so is the static handler.
+ */
+export function isClientPath(pathname) {
+  const path = String(pathname ?? '');
+  return /^\/t\/[^/]+(\/[^/]*)?\/?$/.test(path) || isViewerAddress(path);
 }

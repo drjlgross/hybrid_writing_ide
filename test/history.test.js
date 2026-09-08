@@ -130,11 +130,29 @@ test('the prompt is shown byte-for-byte, not trimmed or tidied', async () => {
   }
 });
 
-test('an empty ledger says so instead of rendering an empty list', async () => {
+test('an empty ledger says what will go there, instead of rendering an empty list', async () => {
   const view = await mount({ history: [] });
   try {
     assert.equal(view.findAll('.turn').length, 0);
-    assert.match(view.text(), /No turns yet/);
+    // Chunk 14: the history is open from the first paint, so a brand-new document
+    // shows this panel before it shows anything else. It is the first thing the
+    // tool says about itself, and "No turns yet" made the product's own record
+    // look like an error state.
+    assert.match(view.text(), /will be recorded here, turn by turn/);
+    assert.doesNotMatch(view.text(), /No turns yet/, 'the apologetic copy is gone');
+  } finally {
+    await view.unmount();
+  }
+});
+
+test('a caller can say what an empty ledger means, because it means two things', async () => {
+  // In a live document "no turns" is an invitation; in a transcript loaded at
+  // /view it is a fact about a session that recorded nothing. One string cannot
+  // be both.
+  const view = await mount({ history: [], emptyMessage: 'This session recorded no turns.' });
+  try {
+    assert.match(view.text(), /This session recorded no turns\./);
+    assert.doesNotMatch(view.text(), /will be recorded here/);
   } finally {
     await view.unmount();
   }

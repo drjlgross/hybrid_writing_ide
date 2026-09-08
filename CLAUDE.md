@@ -65,7 +65,8 @@ names explicitly as such; the assistant does not decide a change has earned one.
 Each ratified commit also appends one line to `CHANGELOG.md`: the version, a
 one-sentence description, and a `(behavior change)` tag when a user will notice the tool
 acting differently. Behavior changes on a deployed tool are the reason this exists — see
-step 14.
+step 14, which is the first step after deploy and therefore the first whose changes
+land on people already holding links.
 
 The app version is distinct from `schema_version` in stored documents and exports (§0.5,
 §4), which moves only when the data shape changes. Neither implies the other, and a patch
@@ -777,7 +778,12 @@ This is the workflow's terminal move and it is the cheapest end-to-end test of �
 and §0.9 together.
 
 ## 4. History / review view
-- A toggleable timeline listing every turn in order.
+- A toggleable timeline listing every turn in order. **It renders OPEN by
+  default** (chunk 14): the record is the product, and a ledger you have to
+  decide to open is one that catches an unasked-for rewording only when you were
+  already suspicious. The Show/hide control is unchanged and is now primarily a
+  hide toggle. Per-session UI state only — no persistence, no per-document
+  setting — because a stored preference is a second place the UI can be wrong.
 - Each entry shows: turn number, author badge (Human / AI / Mixed), timestamp, the
   prompt string for AI turns, any warnings, and a rendered word-level diff (insertions
   green, deletions red strikethrough) against the previous turn's snapshot.
@@ -1060,7 +1066,7 @@ Rules are individually revocable and visible in one place. This is the whole fea
 for a human who knows what her rules are — "no em-dashes," "open on the biology, not
 the pipeline" — and it needs no detection logic of any kind.
 
-**Model-proposed rules (step 16, provisional).** The third route in: on the second
+**Model-proposed rules (step 17, provisional).** The third route in: on the second
 occurrence of the same kind of correction the model proposes a rule *and* makes the
 correction; on the third and after it keeps making it as a one-off until the rule is
 accepted or dismissed (S11). Paired with silence-decay on model-volunteered
@@ -1171,6 +1177,67 @@ whole-draft paste the success metric exists to eliminate.
 Pending state: an indicator in the panel, the editor locked, the draft fully visible.
 No modal, no overlay, no full-screen graphic.
 
+## 12a. The export viewer, at `/view`
+
+A read-only page that renders an exported transcript (§4). Added in chunk 14. It
+exists because a transcript is the thing you SEND: the person reading one is often
+not the person who wrote it, and handing them a capability link so they can read a
+record would give them write access to a namespace in order to show them a file.
+
+**Entirely client-side. The file never leaves the visitor's browser.** There is no
+upload endpoint and no request that carries the file. The bytes come from a file
+the visitor chooses or drops, read in the page. Nothing is stored — no
+localStorage, no sessionStorage, no IndexedDB, no cookie — so closing the tab is
+the whole of deleting it. The page's only network call is `/health`, for the
+version in the footer, and it carries nothing.
+
+**No namespace access.** `/view` reads no token and reaches no document. It cannot,
+which is the point: it is outside `/t/{token}/{slug}` entirely, and someone holding
+no link at all can use it.
+
+**`schema_version` is asserted on the file's bytes at load**, per §4's "the only
+thing a later reader ever sees is those bytes". A file that is not JSON, or is JSON
+without `schema_version: 1`, produces a calm inline error naming what was expected
+and what arrived — never a blank page, never a console-only failure. A file
+claiming a different version is refused whole rather than read in part: a record
+shown with pieces missing is worse than a record not shown.
+
+**Read-only, by absence rather than by disabling.** No editor, no AI panel, no
+Checkpoint, no Restore. The history components are reused as they are; the Restore
+control simply is not given a callback, so it does not exist on the page.
+
+**The Current Draft comes first.** Above the timeline, a card headed *Current
+Draft* renders the LAST turn's snapshot — which §0.3 makes the draft as it stood at
+export — as text rather than as a record. The bottom line, up front: a transcript is
+a record of how a text got made, and the thing a reader most often wants from one is
+the text, which reconstructing by scrolling to the oldest entry and reading forward
+is work nobody should have to do. Nothing is recomputed; full snapshots (§0.4) exist
+so a reader never replays a chain to find out what the text is.
+
+It is rendered with the app's own TipTap extension list, `editable: false`, so the
+§1 dialect renders as marks rather than as Markdown source and the draft reads
+exactly as it reads in the editor. A second Markdown renderer written for this page
+would be free to disagree with the editor about what a draft looks like, which is
+§0.1's failure one layer up. A session with no turns gets no card; a session that
+ended with an empty draft gets the card, saying so.
+
+Then the turn log in order — author, timestamp, the prompt for AI turns, the
+notes as speech distinct from text changes (§0.7, §9 S12), the §2.3 warnings, the
+`segments`, and which context files and standing rules each turn referenced,
+resolved against the export's own `context` and `rules` tables. Metadata only:
+§0.5 keeps file bytes out of an export, so there is nothing here to open. Diffs are
+computed in the browser from the snapshots the file carries (§0.4) — a transcript
+stores no diffs and this page invents none.
+
+Surfacing `segments` here is not step 16. That step is about the LIVE surface
+(§2.2, §9 S2, and S2 is provisional pending re-justification); an archived
+transcript is the one place the decomposition is otherwise unrecoverable.
+
+`/view` must not collide with `/t/{token}/{slug}` or with the API routes. It cannot
+by construction — a document address always begins `/t/`, and §0.5's token is 32
+hex characters — and both the server and the client entry read the same predicate
+in `src/addressing.js` rather than each carrying half of the guarantee.
+
 ## 13. Open items
 
 Existing: **F28** (SDK not adopted; the fetch carries an `AbortSignal.timeout`
@@ -1216,7 +1283,7 @@ by the deploy-readiness chunk further down this section.
   speculative.
 - **F87** What "the same kind of correction" means operationally for S11. This is the
   difference between a useful proposal and a nag, and it is the one genuinely unsolved
-  problem in the extension. **Blocks step 16 and nothing earlier.**
+  problem in the extension. **Blocks step 17 and nothing earlier.**
 Raised by the deploy-readiness chunk, 2026-09-04 (`reports/deploy-readiness.md`):
 
 - **F89** `/` answered Express's default "Cannot GET /" whenever `client/dist` was
@@ -1286,18 +1353,21 @@ not by number, so the reference survives every extension.
 Entries are pointers. Anything a chunk needs to know lives in the section it names;
 what belongs here is *where in the sequence* and *why there*.
 
-Steps 1–13 are built, tested, committed, and live-verified, through the chunk-13
-commit: canonicalize, round-trip, storage, turn model and Checkpoint, AI endpoint,
-editor and panel, clipboard fixture, history view, the spec extension, the §12 UI
-cleanup, model speech, context files plus human-written standing rules, and deploy.
-The detail is in git and in `reports/`.
+Steps 1–14 are built, tested, committed, and live-verified: canonicalize,
+round-trip, storage, turn model and Checkpoint, AI endpoint, editor and panel,
+clipboard fixture, history view, the spec extension, the §12 UI cleanup, model
+speech, context files plus human-written standing rules, deploy, and the export
+viewer with history-on-by-default. Step 14 is `reports/chunk-14.md`, ratified
+2026-09-08 at version `0.1.2` after its live check on the running instance. The
+detail is in git and in `reports/`.
 
-**The app is deployed and in real use.** Step 13 is done, and the version is
-`0.1.0` from the chunk-13 commit per the Versioning rule. `reports/chunk-13.md`
-walks an 11-turn session worked on the hosted instance — three speech-only turns,
-context attached once and carried across two turns, and the dialect constraint
-holding against a direct request for a heading. Step 14 therefore ships to people
-already holding links, which is the cost the swap priced in.
+**The app is deployed and in real use.** Step 13 is done, and the version was
+`0.1.0` from the chunk-13 commit; the WordWright rebrand took it to `0.1.1` per the
+Versioning rule. `reports/chunk-13.md` walks an 11-turn session worked on the hosted
+instance — three speech-only turns, context attached once and carried across two
+turns, and the dialect constraint holding against a direct request for a heading.
+Everything from step 14 on therefore ships to people already holding links, which is
+the cost the deploy/staging swap priced in.
 
 This state line is maintained by the chunk it describes, per the Operating rules.
 
@@ -1313,7 +1383,10 @@ This state line is maintained by the chunk it describes, per the Operating rules
     half. Independent of staging.
 
 **Deploy and staging swapped 2026-09-04, ratified.** Deploy was step 14 and staging
-step 13; they are now 13 and 14. The numbers below are the current order.
+step 13; the swap made them 13 and 14. **Chunk 14 then took the number 14** (the
+export viewer, 2026-09-08), pushing staging to 15 and everything after it down one.
+The numbers below are the current order; the older ones survive in the reports that
+were written under them, which is why this note stays.
 
 13. **Deploy.** Railway with a persistent volume, per §0.5 and §0.6. F37 is resolved
     (§0.5: the default token is refused off localhost), as is F43 (accepted:
@@ -1329,17 +1402,27 @@ step 13; they are now 13 and 14. The numbers below are the current order.
     reorder, priced in, not an oversight to be discovered later. It is also why the
     Versioning rule exists in the Operating rules above.
 
-14. **Staging and disposition.** §0.8, §0.9, the full §2.2 contract, §12. Do not merge
-    this with anything. Now downstream of deploy, so it ships to people already using
+14. **Export viewer and history-on-by-default.** §12a, and §4's amended first
+    bullet. Placed here rather than after staging because both halves are about the
+    RECORD, which is what already exists — neither one waits on §0.8, and neither
+    one touches the turn model, the export format, or the AI path. A transcript
+    became worth sending the moment the tool was deployed and shared, and reading
+    one required either the app or a text editor until this step.
+
+15. **Staging and disposition.** §0.8, §0.9, the full §2.2 contract, §12. Do not merge
+    this with anything. Downstream of deploy, so it ships to people already using
     the tool: it is a `(behavior change)` line in `CHANGELOG.md` by definition.
 
-15. **Segmentation.** §2.2's `segments` surfaced, contingent candidates marked,
-    panel↔editor links. Provisional per §9.
+16. **Segmentation.** §2.2's `segments` surfaced in the LIVE surface, contingent
+    candidates marked, panel↔editor links. Provisional per §9. Note that §12a's
+    viewer already renders `segments` in an archived transcript; this step is about
+    the working surface, which is a different question and the one S2 is provisional
+    about.
 
-16. **Standing rule proposals.** §10's model-proposed half. Provisional per §10;
+17. **Standing rule proposals.** §10's model-proposed half. Provisional per §10;
     blocked on F87.
 
-17. Everything else.
+18. Everything else.
 
 Run `node scripts/smoke-session.js` after every chunk. A passing test proves nothing if
 its fixture is empty; every test runs against the shared fixtures in §5, visible in the

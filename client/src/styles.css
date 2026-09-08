@@ -1112,3 +1112,229 @@ body {
   /* Normal document scroll here too — see the note on .diff above. */
   user-select: text;
 }
+
+/* ── the export viewer, /view (chunk 14) ─────────────────────────────────────
+ *
+ * Deliberately narrow in scope. The viewer reuses the history stylesheet whole —
+ * `.history`, `.turn`, `.diff`, `.turn-speech` and the rest all apply unchanged,
+ * which is the visual half of "reuse the existing history-view components". What
+ * is here is only the page around them.
+ *
+ * `.history` sets `grid-column: 1` for the app's two-column workspace. The viewer
+ * has one column and no grid, so that declaration is inert rather than wrong —
+ * left alone rather than overridden, since a second rule for the same thing is
+ * how the two views start to drift apart. */
+
+.viewer-main {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 4rem;
+}
+
+/* The whole page is the drop target (see Viewer.js), so the drag affordance is a
+   page-wide inset ring rather than a bordered rectangle somewhere in the middle.
+   Inset, not an outline, so nothing shifts and nothing scrolls when it appears. */
+.viewer-dragging {
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+
+/* Centred, because it sits directly under a centred lockup and a left-aligned
+   control beneath one reads as a stray. The app's masthead has no equivalent —
+   its top row is a toolbar of five controls and belongs on the left margin. */
+.viewer-open {
+  margin-top: 0.9rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* A <label> wrapping a real file input: the label is the click and keyboard
+   target, so this works with no JavaScript of ours in the path. It wears the
+   lilac treatment because it is a global control on this page, per §12's split —
+   forest green is reserved for the primary action inside a box, and this page has
+   no boxes in that sense. */
+.file-pick {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--lilac-edge);
+  border-radius: 4px;
+  background: var(--lilac);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.file-pick:hover {
+  background: var(--lilac-hover);
+}
+
+/* Visually hidden, NOT display:none — a hidden input cannot be focused, and this
+   one has to stay reachable by keyboard for the label to activate it. */
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.file-pick:focus-within {
+  outline: 2px solid var(--lilac-deep);
+  outline-offset: 2px;
+}
+
+.viewer-empty p,
+.viewer-error p,
+.viewer-about p {
+  margin: 0 0 0.6rem;
+}
+
+.viewer-empty p:last-child,
+.viewer-error p:last-child,
+.viewer-about p:last-child {
+  margin-bottom: 0;
+}
+
+/* The calm inline error (§ the /view subsection). Bordered in the error colour
+   and carrying role="alert", never a blank page and never console-only — a
+   reader who chose the wrong file must be told which file and what was expected,
+   in the place they were looking. */
+.viewer-error {
+  border-color: var(--error);
+}
+
+.viewer-error-what {
+  color: var(--error);
+}
+
+/* ── the Current Draft card ────────────────────────────────────────────────
+ *
+ * The bottom line, up front: the text as it stood at export, above the history
+ * that produced it. Set apart from the timeline below by the same paper
+ * treatment the editor's own surface wears, because that is what it is — the
+ * draft, not a record about the draft. */
+.draft-card {
+  margin-bottom: 2rem;
+}
+
+.draft-card-head h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1rem;
+}
+
+.draft-card-head .hint {
+  margin: 0 0 0.7rem;
+}
+
+/* The same white writing surface the live editor has, minus the 60vh floor — a
+   three-line draft should be three lines tall here, not most of a screen. It is
+   a TipTap document with `editable: false`, so it takes no caret; these rules
+   mirror `.editor .tiptap` deliberately, so the draft reads here exactly as it
+   reads in the app. */
+.draft-render .tiptap {
+  padding: 1.5rem 1.75rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: none;
+  user-select: text;
+}
+
+.draft-render .tiptap p {
+  margin: 0 0 1em;
+}
+
+.draft-render .tiptap p:last-child {
+  margin-bottom: 0;
+}
+
+.draft-render .tiptap a {
+  color: var(--accent);
+}
+
+.draft-render .tiptap ul {
+  padding-left: 1.4em;
+}
+
+.draft-empty {
+  padding: 1.5rem 1.75rem;
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+}
+
+.viewer-about h2 {
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
+}
+
+.viewer-about {
+  margin-bottom: 0.5rem;
+}
+
+/* What the model was working from: the §2.2 segments and the §3 context/rules
+   references, resolved against the export's own tables. Archived transcripts
+   only — the live history is not given the tables, so none of this appears
+   there. Set apart from the diff above it, and quieter, because it is the
+   circumstances of a turn rather than the turn itself. */
+.turn-provenance {
+  margin-top: 0.8rem;
+  padding-top: 0.7rem;
+  border-top: 1px dotted var(--line);
+  display: grid;
+  gap: 0.6rem;
+}
+
+.segment-list,
+.ref-list {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+}
+
+.segment-list li,
+.ref-list li {
+  margin-bottom: 0.2rem;
+}
+
+/* The model's reading of one part of the prompt (§2.2). The kind is a small
+   fixed vocabulary — edit, question, context, reframe — so it reads as a tag. */
+.segment-kind {
+  display: inline-block;
+  margin-right: 0.5rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  font-family: var(--mono-font);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.ref-name {
+  font-weight: 600;
+}
+
+/* The human's description of a context file, or a rule's scope. Metadata only —
+   §0.5 keeps file bytes out of an export, so there is nothing here to open. */
+.ref-desc {
+  color: var(--muted);
+}
+
+.ref-desc::before {
+  content: ' — ';
+}
+
+/* An id the export's table does not resolve. Shown, never skipped: a citation of
+   something the file did not carry is a fact about the file. */
+.ref-id {
+  font-family: var(--mono-font);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
