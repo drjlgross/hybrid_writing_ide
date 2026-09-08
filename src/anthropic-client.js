@@ -21,14 +21,19 @@ export const API_VERSION = '2023-06-01';
  *
  * §0.6 rules out streaming, so a long draft is one long non-streaming request and
  * the only wrong answer is to wait forever: without this, a hung connection holds
- * the editor locked (§0.2) with no error and no way back except a reload. Two
- * minutes is well past a normal turn at the §2.3 token ceiling and well short of
- * "the tab is broken".
+ * the editor locked (§0.2) with no error and no way back except a reload.
+ *
+ * RAISED 2026-09-08, 120s → 480s, together with §2.3's token budget. The two
+ * numbers are one setting: a generation allowed up to 32000 tokens takes longer
+ * than one allowed 20000, and leaving the timeout where it was would have
+ * converted the max_tokens failures this was meant to fix into abort failures with
+ * the same cause and a less useful message. Eight minutes is well past a full
+ * generation at the §2.3 ceiling and still well short of "the tab is broken".
  *
  * A timeout aborts before any response exists, so it lands in the §2.4 window
  * where the draft is unchanged and the human turn stays committed.
  */
-export const REQUEST_TIMEOUT_MS = 120_000;
+export const REQUEST_TIMEOUT_MS = 480_000;
 
 /**
  * §6's system prompt, rewritten 2026-09-02 for §0.7 and §0.8.

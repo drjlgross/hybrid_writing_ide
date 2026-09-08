@@ -7,6 +7,21 @@ file exists, now that the tool is deployed and someone else may be holding a lin
 
 Entries are newest first.
 
+## 0.1.4 — 2026-09-08 (behavior change)
+
+Raised the AI-turn output budget and the request timeout (§2.3), after a live
+`max_tokens` failure on memo-length work. Thinking shares that budget, and the flat
+term reserved for it was too lean: headroom 1.6 → 2.0, the flat term 2048 → 6144,
+the floor 4096 → 16000. The 32000 ceiling is unchanged and deliberate. The request
+timeout goes 120s → 480s with it, so the larger budget cannot turn `max_tokens`
+failures into abort failures.
+
+Users will notice two things: analysis-heavy turns that were cut off mid-response
+now complete, and a hung request takes eight minutes rather than two to give up —
+during which the editor stays locked (§0.2). §2.3 now states the formula and the
+constants, which it never did; they had lived only in the code, which is how they
+went unexamined until something broke.
+
 ## 0.1.3 — 2026-09-08 (behavior change)
 
 Chunk 15: a public front door. The bare domain is now a landing page where anyone can

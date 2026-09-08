@@ -45,7 +45,9 @@ test('max_tokens is computed from the draft size, never a small constant', () =>
   const large = maxTokensForDraft('x'.repeat(40_000));
 
   assert.ok(large > small, 'a larger draft must get a larger budget');
-  assert.ok(small >= 4096, `floor is too low: ${small}`);
+  // The floor was 4096 until 2026-09-08. It is 16000 because thinking shares this
+  // budget, and a live analysis turn on a memo-length draft exhausted the old one.
+  assert.ok(small >= 16_000, `floor is too low: ${small}`);
   assert.ok(large >= Math.ceil(40_000 / 3), 'the budget must cover reproducing the draft');
   assert.ok(large <= 32_000, 'the budget must stay under the practical ceiling');
 
@@ -54,6 +56,20 @@ test('max_tokens is computed from the draft size, never a small constant', () =>
   for (let i = 1; i < sizes.length; i += 1) {
     assert.ok(sizes[i] >= sizes[i - 1], `budget went down as the draft grew: ${sizes}`);
   }
+});
+
+test('a memo-length draft gets a budget that survives an analysis turn', () => {
+  // The exact case that failed live: ~10,000 characters, an analysis-heavy prompt,
+  // and thinking sharing the same budget. Written against the number rather than
+  // the formula, because the formula is what was wrong — a test that recomputed it
+  // would have agreed with the bug.
+  const memo = maxTokensForDraft('x'.repeat(10_000));
+  assert.ok(memo >= 16_000, `a 10,000-character draft must get at least 16000: ${memo}`);
+
+  // And the ceiling still binds, which is a decision (§2.3): with no streaming and
+  // a finite timeout, an unbounded generation trades a truncation the guards catch
+  // for a hang they cannot.
+  assert.equal(maxTokensForDraft('x'.repeat(200_000)), 32_000);
 });
 
 test('a truncated response is NOT committed (stop_reason guard)', () => {

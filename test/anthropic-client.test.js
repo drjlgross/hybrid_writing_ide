@@ -52,7 +52,7 @@ test('the request carries the model, version header, and a draft-sized max_token
   const payload = JSON.parse(init.body);
   assert.equal(payload.model, MODEL);
   assert.equal(payload.max_tokens, maxTokensForDraft(draft));
-  assert.ok(payload.max_tokens > 4096, 'a long draft must get a budget bigger than the floor');
+  assert.ok(payload.max_tokens > 16_000, 'a long draft must get a budget bigger than the floor');
   assert.equal(payload.messages[0].role, 'user');
   // Content is a BLOCK LIST since step 12: §8 C3 makes an attached image a real
   // `image` block the model reads, so a plain string could not carry one.
@@ -166,6 +166,15 @@ test('every request carries an abort signal with a timeout', async () => {
   assert.equal(typeof signal.aborted, 'boolean');
   assert.equal(signal.aborted, false);
   assert.ok(REQUEST_TIMEOUT_MS > 0);
+  // The timeout and §2.3's token budget are one setting. A generation allowed up
+  // to 32000 tokens takes longer than one allowed 20000, so a timeout left at two
+  // minutes would turn the max_tokens failures the raised budget fixes into abort
+  // failures with the same cause. Asserted as a floor rather than an equality, so
+  // raising it further does not fail here — lowering it below the budget does.
+  assert.ok(
+    REQUEST_TIMEOUT_MS >= 480_000,
+    `the timeout must leave room for a full generation at the §2.3 ceiling: ${REQUEST_TIMEOUT_MS}`,
+  );
 });
 
 /**
@@ -217,6 +226,14 @@ test('a timeout is reported as prose, saying the draft is unchanged', async () =
     () => callModel({ draft: 'a draft\n', prompt: 'p' }),
     (error) => {
       assert.match(error.message, /did not respond within/);
+      // The seconds in the message are rendered from the constant, so raising the
+      // timeout cannot leave the message quoting the old one. Asserted from
+      // REQUEST_TIMEOUT_MS rather than from a literal, which is the whole point.
+      assert.match(
+        error.message,
+        new RegExp(`within ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s`),
+        'the message quotes the configured timeout, not a stale number',
+      );
       assert.match(error.message, /draft is unchanged/, 'the human has to be told their text is safe');
       assert.doesNotMatch(error.message, /TimeoutError/, 'a raw DOMException reads as a bug in the app');
       return true;

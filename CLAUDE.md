@@ -709,6 +709,34 @@ checked and anything but `end_turn` refused; defensive fence stripping; empty re
 rejected; the 40% shrink soft guard; the out-of-dialect construct check with structured
 per-construct counts.)*
 
+**The output budget and the request timeout, stated here 2026-09-08.** They lived
+only in the code until a live `max_tokens` failure on memo-length work showed that
+nobody could check the constants against anything ratified. The formula:
+
+    max_tokens = min(max(ceil(chars / 3) × 2.0 + ceil(NOTE_MAX_CHARS / 3) + 6144,
+                         16000),
+                     32000)
+
+The headroom factor was 1.6, the flat term 2048 and the floor 4096; they were raised
+because **thinking shares this budget** and an analysis-heavy turn on a ~10K-character
+draft exhausted it. The flat term is thinking and segments; the note is budgeted
+explicitly rather than left to headroom, because a long note on a short draft is
+exactly the case that hits the cap, and a response cut off mid-JSON does not parse at
+all.
+
+**The ceiling stays 32000, deliberately.** With no streaming (§0.6) and a finite
+timeout, an unbounded single generation trades a truncation the `stop_reason` guard
+catches for a hang it cannot. The known limit: a draft past roughly 36,000 characters
+is clamped, so its budget stops covering twice the draft plus the flat terms. That is
+a limit, not a bug to be fixed by removing the ceiling.
+
+**The request timeout is 480s**, raised from 120s with the budget. The two are one
+setting: a generation allowed 32000 tokens takes longer than one allowed 20000, and a
+timeout left behind converts `max_tokens` failures into abort failures with the same
+cause and a less useful message. The timeout aborts before any response exists, so it
+lands in the §2.4 window where the draft is unchanged and the human turn stays
+committed.
+
 **Extended 2026-09-02:**
 
 - The guards apply to **each candidate's `replacement`**, not only to a whole draft.

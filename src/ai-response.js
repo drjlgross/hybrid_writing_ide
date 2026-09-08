@@ -95,8 +95,8 @@ export const RESPONSE_SCHEMA = {
  *
  * The model returns the COMPLETE revised draft, so the output is at least the
  * size of the input. Sizing: ~3 chars per token is conservative for this
- * tokenizer, times a headroom factor for a draft that grows, plus a floor for
- * thinking, which shares the same budget.
+ * tokenizer, times a headroom factor for a draft that grows, plus a flat term for
+ * thinking and segments, which share the same budget.
  *
  * The §2.2 envelope adds to it: the draft now arrives JSON-escaped, alongside the
  * note and the segments. A note that runs to `NOTE_MAX_CHARS` is budgeted for
@@ -104,13 +104,29 @@ export const RESPONSE_SCHEMA = {
  * short draft would otherwise be exactly the case that hits max_tokens — and a
  * response cut off mid-JSON does not parse at all.
  *
+ * RAISED 2026-09-08 after a live max_tokens failure on memo-length work: an
+ * analysis-heavy turn on a ~10K-character draft exhausted the budget, because
+ * thinking shares it and the flat term for thinking was 2048. The formula's shape
+ * was right and its constants were lean — headroom 1.6 → 2.0, the flat term
+ * 2048 → 6144, the floor 4096 → 16000. See reports/mini-token-cap.md.
+ *
+ * THE CEILING STAYS 32000, and that is a decision rather than an oversight. With a
+ * non-streaming client (F28) and a finite request timeout, an unbounded single
+ * generation is the wrong trade: it converts a truncated response — which §2.3
+ * catches on `stop_reason` and refuses — into a request that hangs until it is
+ * aborted, which is a worse failure with the same cause. The known limit is that a
+ * draft past roughly 36,000 characters is clamped here, so its budget stops
+ * covering twice the draft plus the flat terms; a very long document can still hit
+ * max_tokens, and that is a limit rather than a bug to be fixed by removing the
+ * ceiling.
+ *
  * @param {string} draft
  */
 export function maxTokensForDraft(draft) {
   const estimatedDraftTokens = Math.ceil(draft.length / 3);
   const noteBudget = Math.ceil(NOTE_MAX_CHARS / 3);
-  const withHeadroom = Math.ceil(estimatedDraftTokens * 1.6) + noteBudget + 2048;
-  return Math.min(Math.max(withHeadroom, 4096), 32000);
+  const withHeadroom = Math.ceil(estimatedDraftTokens * 2.0) + noteBudget + 6144;
+  return Math.min(Math.max(withHeadroom, 16000), 32000);
 }
 
 /**
