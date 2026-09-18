@@ -161,9 +161,46 @@ export function validateClaim({ name, email } = {}) {
 
 // ── per-IP friction ───────────────────────────────────────────────────────────
 
-/** Five claims an hour from one address. Nobody signing up in good faith reaches
- *  this; a script does it in a second. */
-export const CLAIM_LIMIT = 5;
+/** Five claims an hour from one address, unless the deployment says otherwise.
+ *  Nobody signing up in good faith reaches this; a script does it in a second. */
+const CLAIM_LIMIT_DEFAULT = 5;
+
+/**
+ * Read a claim limit out of an environment variable's raw string value.
+ *
+ * PURE, AND SEPARATE FROM THE READ, so every edge case below is testable without
+ * mutating `process.env` or re-importing this module to catch it at load time.
+ *
+ * A positive integer is taken as written. EVERYTHING ELSE FALLS BACK TO THE
+ * DEFAULT — unset, empty, non-numeric, zero, negative, fractional. There is no
+ * ceiling, deliberately: the reason this is configurable at all is a venue where
+ * every attendee shares one NAT'd address, and a cap chosen here would be a second
+ * limit the operator cannot see from the dashboard she set the first one in.
+ *
+ * Falling back rather than throwing is the same choice: a typo in a dashboard
+ * field must not take the front door down. It costs a misconfiguration that looks
+ * like the default, which is the survivable direction — nothing here can refuse a
+ * model call, and friction is all that is at stake (see the header note).
+ *
+ * @param {unknown} raw the environment variable's value, as read
+ * @returns {number} a positive integer
+ */
+export function claimLimitFromEnv(raw) {
+  if (typeof raw !== 'string') return CLAIM_LIMIT_DEFAULT;
+  const trimmed = raw.trim();
+  if (trimmed === '') return CLAIM_LIMIT_DEFAULT;
+
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1) return CLAIM_LIMIT_DEFAULT;
+  return parsed;
+}
+
+/**
+ * Read once, at module load. The limiter's default, and the number the 429 message
+ * quotes, are both this — so a dashboard change takes effect on the next restart
+ * and nothing downstream needs to know it was configurable.
+ */
+export const CLAIM_LIMIT = claimLimitFromEnv(process.env.CLAIM_LIMIT);
 export const CLAIM_WINDOW_MS = 60 * 60 * 1000;
 
 /** Above this many tracked addresses, the oldest windows are dropped. A bound on

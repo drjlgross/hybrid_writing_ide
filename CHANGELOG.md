@@ -7,6 +7,21 @@ file exists, now that the tool is deployed and someone else may be holding a lin
 
 Entries are newest first.
 
+## 0.1.5 — 2026-09-18
+
+The sign-up rate limit reads from the environment: `CLAIM_LIMIT` on the process
+sets how many claims one address may make per hour, so a conference venue where
+every attendee shares one NAT'd address can be accommodated from the dashboard
+rather than from a commit. Unset, or set to anything that is not a positive integer,
+it falls back to five — the number that was hardcoded — so a typo in a dashboard
+field cannot take the front door down.
+
+No `(behavior change)` tag, deliberately: with the variable unset, which is how the
+deployment stands, nothing about the tool differs from the commit before it. The
+parser is pure and separately tested; the one line that reads `process.env` is not
+observable from `npm test` without mutating it, and `reports/mini-claim-limit-env.md`
+names that gap rather than papering over it.
+
 ## 0.1.4 — 2026-09-08 (behavior change)
 
 Raised the AI-turn output budget and the request timeout (§2.3), after a live

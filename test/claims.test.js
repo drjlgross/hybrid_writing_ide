@@ -28,6 +28,7 @@ import { isClientPath, isLandingAddress } from '../src/addressing.js';
 import {
   CLAIM_LIMIT,
   CLAIM_WINDOW_MS,
+  claimLimitFromEnv,
   claimNamespace,
   claimsRegistryPath,
   clientAddress,
@@ -44,6 +45,10 @@ import { NO_BUILD_NOTICE, createServer } from '../src/server.js';
 import { resolveNamespace } from '../src/namespace.js';
 
 // ── harness ───────────────────────────────────────────────────────────────────
+
+/** Written out rather than imported: the assertion is that FIVE is what ships,
+ *  and reading the default from the module under test could not fail. */
+const CLAIM_LIMIT_DEFAULT_VALUE = 5;
 
 const roots = [];
 function freshRoot() {
@@ -128,6 +133,63 @@ test('the email check is deliberately loose — it catches typos, not liars', ()
 });
 
 // ── 2. friction ───────────────────────────────────────────────────────────────
+
+test('claimLimitFromEnv takes a positive integer and falls back on everything else', () => {
+  // Tested as a PURE FUNCTION, deliberately. `CLAIM_LIMIT` is read once at module
+  // load, so the only ways to exercise these cases through the constant would be
+  // mutating `process.env` (which leaks into every other test in the process) or
+  // re-importing the module per case (which tests the loader, not the parser).
+  // The parser is where every decision is; the read is one line above it.
+
+  // A positive integer is taken as written — the conference case, where one NAT'd
+  // address is shared by a room full of people signing up at once.
+  assert.equal(claimLimitFromEnv('50'), 50);
+  assert.equal(claimLimitFromEnv('1'), 1, 'one is a valid limit, not an edge case');
+  assert.equal(claimLimitFromEnv('  12  '), 12, 'a dashboard field keeps its whitespace');
+
+  // No ceiling: a limit is friction, and a cap here would be a second limit the
+  // operator cannot see from the field she set the first one in.
+  assert.equal(claimLimitFromEnv('100000'), 100000);
+
+  // Unset — the variable was never set, so Node hands back `undefined`.
+  assert.equal(claimLimitFromEnv(undefined), CLAIM_LIMIT_DEFAULT_VALUE);
+  // Set to nothing, which is what an emptied dashboard field produces.
+  assert.equal(claimLimitFromEnv(''), CLAIM_LIMIT_DEFAULT_VALUE);
+  assert.equal(claimLimitFromEnv('   '), CLAIM_LIMIT_DEFAULT_VALUE);
+
+  // Garbage, in the shapes a person actually types.
+  assert.equal(claimLimitFromEnv('five'), CLAIM_LIMIT_DEFAULT_VALUE);
+  assert.equal(claimLimitFromEnv('5 claims'), CLAIM_LIMIT_DEFAULT_VALUE);
+  assert.equal(claimLimitFromEnv('NaN'), CLAIM_LIMIT_DEFAULT_VALUE);
+  assert.equal(claimLimitFromEnv('Infinity'), CLAIM_LIMIT_DEFAULT_VALUE, 'not an integer');
+
+  // Zero would close the front door to everyone, which no operator means by it.
+  assert.equal(claimLimitFromEnv('0'), CLAIM_LIMIT_DEFAULT_VALUE);
+  assert.equal(claimLimitFromEnv('-3'), CLAIM_LIMIT_DEFAULT_VALUE);
+
+  // A float has no meaning as a count of claims.
+  assert.equal(claimLimitFromEnv('2.5'), CLAIM_LIMIT_DEFAULT_VALUE);
+  assert.equal(claimLimitFromEnv('5.0'), 5, '5.0 IS the integer five, and is accepted');
+
+  // Not a string at all — belt and braces around whatever `process.env` yields.
+  assert.equal(claimLimitFromEnv(null), CLAIM_LIMIT_DEFAULT_VALUE);
+  assert.equal(claimLimitFromEnv(7), CLAIM_LIMIT_DEFAULT_VALUE, 'the raw value is a string or nothing');
+});
+
+test('the shipped default is five, and the limiter and the parser agree on it', () => {
+  // The two halves of the swap: the parser's fallback is the number that was
+  // hardcoded, and `CLAIM_LIMIT` is still what `createClaimLimiter` defaults to —
+  // so a deployment that sets nothing behaves exactly as it did before.
+  assert.equal(CLAIM_LIMIT_DEFAULT_VALUE, 5, 'the default did not move');
+  assert.equal(claimLimitFromEnv(undefined), CLAIM_LIMIT_DEFAULT_VALUE);
+
+  let clock = 0;
+  const configured = createClaimLimiter({ limit: claimLimitFromEnv('2'), now: () => clock });
+  configured.record('1.2.3.4');
+  assert.equal(configured.check('1.2.3.4').allowed, true, 'one of two');
+  configured.record('1.2.3.4');
+  assert.equal(configured.check('1.2.3.4').allowed, false, 'a configured limit is honoured');
+});
 
 test('the limiter allows CLAIM_LIMIT claims per window, then refuses with a wait', () => {
   let clock = 0;
