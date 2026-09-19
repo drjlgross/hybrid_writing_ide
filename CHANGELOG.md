@@ -7,6 +7,20 @@ file exists, now that the tool is deployed and someone else may be holding a lin
 
 Entries are newest first.
 
+## 0.1.6 — 2026-09-19
+
+`npm run users-report` gained `human` and `ai` columns: the count of turns in each
+namespace's documents, on both tables and the CSV. The two `.jsonl` files it joined
+measure model spend and nothing else, so a person who writes all evening and never
+calls the model appeared as `0 calls, $0.0000, —` and read as someone who signed up
+and left. Run against the real documents root, one namespace showed four human turns
+behind exactly that line.
+
+No `(behavior change)` tag: it is an operator CLI, served by no route, imported by
+nothing in `src/`, and nobody holding a link can see it. Counts are raw — the seed
+turn is not subtracted, so a namespace that was only ever opened reads `1 / 0`,
+which is what distinguishes it from one that was written in.
+
 ## 0.1.5 — 2026-09-18
 
 The sign-up rate limit reads from the environment: `CLAIM_LIMIT` on the process
